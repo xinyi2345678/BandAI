@@ -7,8 +7,8 @@ import openai
 from dotenv import load_dotenv
 load_dotenv()
 # Insert your API key here
-
-client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+openai_api_key = st.secrets["OPENAI_API_KEY"]
+client = openai.OpenAI(api_key= openai_api_key)
 
 txt_folder = "Regulations"  # Change to your folder name
 txt_files = [os.path.join(txt_folder, f) for f in os.listdir(txt_folder) if f.endswith(".txt")]

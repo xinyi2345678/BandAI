@@ -99,29 +99,16 @@ def enforce_schema(data: dict, allowed_regs: list[str]) -> dict:
 # -----------------------------------------------------------
 # Best practice: put your service account JSON into st.secrets["gcp_service_account"].
 # Fallback to inline dict if needed (NOT RECOMMENDED for public repos).
-load_dotenv()
 
-env_var_string = os.getenv("SERVICE_ACCOUNT_INFO")
 
-if env_var_string:
-    try:
-        SERVICE_ACCOUNT_INFO_DICT = json.loads(env_var_string)
-        print("Successfully loaded SERVICE_ACCOUNT_INFO as a dictionary:")
-        print(SERVICE_ACCOUNT_INFO_DICT)
-        print(type(SERVICE_ACCOUNT_INFO_DICT)) # This will print <class 'dict'>
-    except json.JSONDecodeError as e:
-        print(f"Error decoding JSON from SERVICE_ACCOUNT_INFO environment variable: {e}")
-        SERVICE_ACCOUNT_INFO_DICT = None
-else:
-    print("SERVICE_ACCOUNT_INFO environment variable not found.")
-    SERVICE_ACCOUNT_INFO_DICT = None
+
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive",
 ]
 
-SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
-
+SERVICE_ACCOUNT_INFO_DICT = st.secrets["SERVICE_ACCOUNT_INFO"]
+SPREADSHEET_ID = st.secrets["SPREADSHEET_ID"]
 ALLOWED_REGS_DEFAULT = [
     "EU Digital Services Act (DSA)",
     "California state law - Protecting Our Kids from Social Media Addiction Act",
