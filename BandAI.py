@@ -50,7 +50,8 @@ except Exception:
 # -----------------------------------------------------------
 # Seed Knowledge (editable in UI)
 # -----------------------------------------------------------
-TERMINOLOGY_TEXT = """
+# --- Safe defaults for UI constants (avoid NameError on partial reruns) ---
+DEFAULT_TERMINOLOGY_TEXT = """
 NR: Not recommended; used to mark a setting that should not be overridden without parental consent.
 PF: Personalized Feed; recommendation system that may require special handling for minors in some regions.
 GH: Geo-handler; module that routes features based on user region.
@@ -71,16 +72,21 @@ BB: Baseline Behavior; baseline used by anomaly detection.
 Snowcap: Child safety policy framework codename.
 FR: Feature rollout status tracking.
 IMT: Internal monitoring trigger.
-"""
+""".strip()
 
-REGULATIONS_TEXT = """
+DEFAULT_REGULATIONS_TEXT = """
 EU Digital Services Act (DSA): Platforms must ensure transparency and region-specific enforcement for content visibility, removal, and auditability in the EU/EEA.
 California SB976: For users under 18 in California, certain personalization features (like PF) may be disabled by default unless parental opt-in is provided.
 Florida minors law: Requires additional protections for minors, including stricter notification policies and parental safeguards.
 Utah Social Media Regulation Act: Imposes curfew-based restrictions and parental controls for users under 18 located in Utah.
 US federal reporting to NCMEC: Providers must report identified child sexual abuse material; triggers real-time scanning with audit logs.
 General data retention requirements: Enforce DRT thresholds, automatic deletion, and region-aware retention audits via CDS.
-"""
+""".strip()
+
+# If already defined elsewhere, keep them; otherwise initialize.
+TERMINOLOGY_TEXT  = globals().get("TERMINOLOGY_TEXT",  DEFAULT_TERMINOLOGY_TEXT)
+REGULATIONS_TEXT  = globals().get("REGULATIONS_TEXT",  DEFAULT_REGULATIONS_TEXT)
+
 # -----------------------------------------------------------
 # Validators (strict schema enforcement)
 # -----------------------------------------------------------
@@ -310,6 +316,24 @@ def safe_json(s: str) -> T.Optional[dict]:
 # -----------------------------------------------------------
 # Allowed regulations (dynamic)
 # -----------------------------------------------------------
+def parse_allowed_regulations(reg_text: str) -> T.List[str]:
+    """
+    Parse allowed regulation labels from the text area (left of the first ':' on each non-empty line).
+    Adds 'None' automatically.
+    """
+    allowed = []
+    for line in (reg_text or "").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):  # skip blanks/comments
+            continue
+        label = line.split(":", 1)[0].strip()
+        if label:
+            allowed.append(label)
+    allowed = sorted(set(allowed))
+    if "None" not in allowed:
+        allowed.append("None")
+    return allowed
+
 def sanitize_violation(v: T.Any) -> str:
     v_str = str(v).strip().capitalize()
     return v_str if v_str in {"Yes", "No", "Unclear"} else "Unclear"
@@ -497,13 +521,24 @@ with col1:
         st.image(logo, width=200)  # bigger logo
 
 with col2:
-    st.markdown("""
-    <div class="bandai-title">
-        <span>B</span><span>a</span><span>n</span><span>d</span><span>A</span><span>I</span>
-        <span class="rocket">🚀</span>
-    </div>
-    """,
-    unsafe_allow_html=True)
+    
+    st.markdown(
+        """
+        <div style='text-align:center;'>
+            <div class='bandai-title'>
+                <span class="letter">B</span>
+                <span class="letter">a</span>
+                <span class="letter">n</span>
+                <span class="letter">d</span>
+                <span class="letter">A</span>
+                <span class="letter">I</span>
+            </div>
+            <div class="rocket">🚀</div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
 
 with col3:
     st.markdown("")
@@ -529,15 +564,15 @@ for k, v in defaults.items():
 with st.sidebar:
     st.subheader("Knowledge Base (editable)")
     term_text = st.text_area("Terminology", TERMINOLOGY_TEXT, height=180)
-    
+    reg_text = st.text_area("Regulations", REGULATIONS_TEXT, height=220)
 
     if st.button("🔁 Rebuild KB / Allowed regs"):
         # Build KB (RAG)
-        kb_texts = chunk_text(term_text, 600)
+        kb_texts = chunk_text(term_text, 600) + chunk_text(reg_text, 600)
         st.session_state.KB_TEXTS = kb_texts
         st.session_state.KB_VECS = build_kb_embeddings(kb_texts)
         # Parse allowed regs dynamically from the Regulations text
-        
+        st.session_state.ALLOWED_REGS = parse_allowed_regulations(reg_text)
         st.success(f"KB rebuilt ({len(kb_texts)} chunks). Allowed regs: {len(st.session_state.ALLOWED_REGS)}")
 
     st.markdown("---")
