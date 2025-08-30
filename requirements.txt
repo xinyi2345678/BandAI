@@ -1,14 +1,22 @@
-streamlit
-pandas
-torch
-numpy
-scikit-learn
-sentence-transformers
-faiss-cpu
-pydantic
-Pillow
-gspread
-gspread-dataframe
-google-cloud-aiplatform
-openai
-python-dotenv
+# Core app
+streamlit==1.38.0
+pandas==2.2.2
+numpy==1.26.4
+scikit-learn==1.5.1
+Pillow==10.4.0
+pydantic==2.8.2
+xlsxwriter==3.2.0
+
+# Google Sheets
+gspread==6.1.2
+google-auth==2.31.0
+gspread-dataframe==3.3.1
+
+# RAG stack (CPU)
+sentence-transformers==2.7.0
+torch==2.2.2
+faiss-cpu==1.8.0
+
+# API + env
+openai>=1.40.0
+python-dotenv==1.0.1
