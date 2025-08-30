@@ -37,3 +37,54 @@ Add Your Key: Open the .env file with a text editor and add the following line, 
 
 OPENAI_API_KEY="your_api_key_here"
 
+3. Set Up Google Sheets API Access (to update the google sheets embedded in Looker Studio Dashboard)
+
+To enable the app to read/write results to Google Sheets, you must create your own Google Cloud Service Account key.
+
+### Steps:
+a. **Go to Google Cloud Console**  
+   Visit [https://console.cloud.google.com/](https://console.cloud.google.com/) and log in with your Google account.
+b. **Create a New Project (optional)**  
+   - In the top navigation bar, click the project dropdown.  
+   - Click **New Project** and give it a name (e.g., `BandAI`).  
+   - Select or create a billing account if prompted.
+c. **Enable APIs**  
+   - In the left sidebar, go to **APIs & Services → Library**.  
+   - Search for and enable:  
+     - **Google Sheets API**  
+
+d. **Create a Service Account**  
+   - In the left sidebar, go to **IAM & Admin → Service Accounts**.  
+   - Click **+ Create Service Account**.  
+   - Give it a name (e.g., `bandai-sheets`).  
+   - Assign role: **Editor** (this allows read/write access to Sheets and Drive).  
+   - Finish and save.
+
+e. **Generate a Service Account Key**  
+   - Click your newly created service account.  
+   - Go to **Keys → Add Key → Create New Key**.  
+   - Choose **JSON** format and download the file.  
+   - This JSON file contains your API credentials.
+
+f. **Share Your Target Google Sheet**  
+   - Open the Google Sheet geo_reg_prepped' that's embedded behind the Dashboard.  
+   - Click **Share** and add the **Service Account email** (something like `bandai-sheets@your-project-id.iam.gserviceaccount.com`).  
+   - Give it **Editor** access.
+
+g. **Add Key to Environment File**  
+   - Open your `.env` file (create it in the project root if it doesn’t exist).  
+   - Paste the entire JSON key as one line like this:
+
+     ```
+     GOOGLE_SERVICE_ACCOUNT_JSON='{
+       "type": "service_account",
+       "project_id": "your-project-id",
+       "private_key_id": "xxxxxxxxxxxxxxx",
+       "private_key": "-----BEGIN PRIVATE KEY-----\nMIIE...==\n-----END PRIVATE KEY-----\n",
+       "client_email": "bandai-sheets@your-project-id.iam.gserviceaccount.com",
+       "client_id": "1234567890",
+       ...
+     }'
+     ```
+     SPREADSHEET_ID = "1AbCdEfGh1234567"
+   - Make sure `.env` is **not** committed to GitHub.
