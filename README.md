@@ -65,7 +65,7 @@ e. **Generate a Service Account Key**
    - This JSON file contains your API credentials.
 
 f. **Share Your Target Google Sheet**  
-   - Open the Google Sheet geo_reg_prepped' that's embedded behind the Dashboard.  
+   - Open the Google Sheet [https://docs.google.com/spreadsheets/d/1sHmOYgL-J6AsYRg-4Bhap9ARxRfWMUEYyT3CEVT98i4/edit?gid=0#gid=0](https://docs.google.com/spreadsheets/d/1sHmOYgL-J6AsYRg-4Bhap9ARxRfWMUEYyT3CEVT98i4/edit?usp=sharing) that's embedded behind the Dashboard.  
    - Click **Share** and add the **Service Account email** (something like `bandai-sheets@your-project-id.iam.gserviceaccount.com`).  
    - Give it **Editor** access.
 
