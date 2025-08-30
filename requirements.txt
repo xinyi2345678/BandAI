@@ -12,3 +12,4 @@ vertexai
 openai
 sentence_transformers
 faiss
+python-dotenv
