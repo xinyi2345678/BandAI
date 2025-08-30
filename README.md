@@ -1,5 +1,5 @@
 **Getting Started
-Please access our streamlit app at [https://bandai-pfgqstfbdsrvdpfbkjelns.streamlit.app/](url)
+Please access our streamlit app at [https://bandai-bv3vvjdpz8pdpic5ziqxnz.streamlit.app/]([url](https://bandai-bv3vvjdpz8pdpic5ziqxnz.streamlit.app/))
 
 To run locally with your own AI,
 1. Unzip BandAI.zip to extract all relevant files.
