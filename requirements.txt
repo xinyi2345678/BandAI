@@ -1,7 +1,6 @@
 streamlit
 pandas
-Numpy
-os
+numpy
 torch
 scikit-learn
 pydantic
