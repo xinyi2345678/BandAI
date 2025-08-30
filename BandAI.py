@@ -1,4 +1,3 @@
-# streamlit_app.py — No‑RAG version
 # -----------------------------------------------------------
 from __future__ import annotations
 from typing import List, Literal, Optional, Tuple
@@ -91,7 +90,9 @@ def enforce_schema(data: dict, allowed_regs: list[str]) -> dict:
         norm["reason2"] = ""
     if "past_record" not in norm:
         norm["past_record"] = {}
+    norm = _coerce_violation_regs(norm, allowed_regs)
     return norm
+
 
 
 # -----------------------------------------------------------
@@ -153,6 +154,37 @@ def _gc_from_dict():
     creds = Credentials.from_service_account_info(SERVICE_ACCOUNT_INFO_DICT, scopes=SCOPES)
     return gspread.authorize(creds)
 
+def _coerce_violation_regs(norm: dict, allowed: list[str]) -> dict:
+    """
+    Enforce coherent pairing of violation/regulations.
+    - If violation == "No": force ["None"]
+    - If violation == "Yes" and regs == ["None"] or empty: flip to "Unclear" and annotate reason2
+    - Always sanitize regs to the allowed list
+    """
+    # ensure list type first
+    regs = norm.get("regulations", [])
+    if isinstance(regs, str):
+        regs = [r.strip() for r in regs.split(",") if r.strip()]
+    regs = sanitize_regulations_dynamic(regs, allowed)
+
+    v = sanitize_violation(norm.get("violation", "Unclear"))
+
+    # if explicitly No -> regs must be ["None"]
+    if v == "No":
+        regs = ["None"]
+
+    # if Yes but no real regs, soften to Unclear (or keep Yes if you prefer)
+    if v == "Yes" and (not regs or regs == ["None"]):
+        v = "Unclear"
+        # append a gentle hint
+        r2 = str(norm.get("reason2", "")).strip()
+        hint = "Regulations missing while violation=Yes; set to Unclear. Please select a regulation."
+        norm["reason2"] = f"{r2} | {hint}" if r2 else hint
+
+    norm["violation"] = v
+    norm["regulations"] = regs
+    return norm
+
 @st.cache_data(show_spinner=False)
 def load_existing_sheets(spreadsheet_id: str):
     gc = _gc_from_dict()
@@ -182,8 +214,16 @@ def _now_iso():
     return datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
 
 def sanitize_violation(v: T.Any) -> str:
-    v_str = str(v).strip().capitalize()
-    return v_str if v_str in {"Yes", "No", "Unclear"} else "Unclear"
+    if isinstance(v, bool):
+        return "Yes" if v else "No"
+    v_str = str(v).strip().lower()
+    if v_str in {"yes", "y", "true", "1"}:
+        return "Yes"
+    if v_str in {"no", "n", "false", "0"}:
+        return "No"
+    if v_str in {"unclear", "unknown", "maybe"}:
+        return "Unclear"
+    return "Unclear"
 
 def sanitize_confidence(x: T.Any) -> T.Union[float, int]:
     try:
@@ -848,7 +888,9 @@ def _save_ai2_corrections(edited_df: pd.DataFrame):
             "regulations": row_after_ui.get("regulations"),
         }
         final_norm = enforce_schema(cleaned, allowed)
+        final_norm = _coerce_violation_regs(final_norm, allowed)
         final_norm["confidence_level"] = 2  # mark human intervention
+
 
         # Update precedent memory rows
         prec_rows.append({
