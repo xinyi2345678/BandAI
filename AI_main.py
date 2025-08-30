@@ -4,7 +4,9 @@ import torch
 import os
 from sentence_transformers import SentenceTransformer
 import openai
+import streamlit as st
 from dotenv import load_dotenv
+
 load_dotenv()
 # Insert your API key here
 openai_api_key = st.secrets["OPENAI_API_KEY"]
