@@ -84,5 +84,3 @@ g. **Add Key to Environment File**
        ...
      }'
      ```
-     SPREADSHEET_ID = "1AbCdEfGh1234567"
-   - Make sure `.env` is **not** committed to GitHub.
