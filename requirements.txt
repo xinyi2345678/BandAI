@@ -6,7 +6,7 @@ scikit-learn==1.5.1
 Pillow==10.4.0
 pydantic==2.8.2
 xlsxwriter==3.2.0
-
+openpyxl
 # Google Sheets
 gspread==6.1.2
 google-auth==2.31.0
