@@ -6,26 +6,54 @@ from sentence_transformers import SentenceTransformer
 import openai
 import streamlit as st
 from dotenv import load_dotenv
+import json
 
 load_dotenv()
 # Insert your API key here
 openai_api_key = st.secrets["OPENAI_API_KEY"]
 client = openai.OpenAI(api_key= openai_api_key)
 
-txt_folder = "Regulations"  # Change to your folder name
-txt_files = [os.path.join(txt_folder, f) for f in os.listdir(txt_folder) if f.endswith(".txt")]
-
+# Load and index regulations
 documents = []
-for txt_file in txt_files:
-    with open(txt_file, "r", encoding="utf-8") as f:
-        doc_text = f.read()
-        documents.append(doc_text)
+index: faiss.IndexFlatL2 | None = None
 embedder = SentenceTransformer('all-MiniLM-L6-v2')
-doc_embeddings = embedder.encode(documents, convert_to_numpy=True)
 
-dimension = doc_embeddings.shape[1]
-index = faiss.IndexFlatL2(dimension)
-index.add(np.array(doc_embeddings))
+def reload_regulations(folder: str = "Regulations") -> list[str]:
+    """
+    (Re)load all .txt files from `folder`, rebuild embeddings and FAISS index.
+    Returns: list of loaded filenames (sorted).
+    """
+    global documents, index
+
+    if not os.path.isdir(folder):
+        os.makedirs(folder, exist_ok=True)
+
+    txt_paths = [os.path.join(folder, f) for f in os.listdir(folder) if f.lower().endswith(".txt")]
+    txt_paths.sort()
+
+    new_docs: list[str] = []
+    for p in txt_paths:
+        with open(p, "r", encoding="utf-8", errors="replace") as f:
+            new_docs.append(f.read())
+
+    # Empty folder → keep empty state
+    if not new_docs:
+        documents = []
+        index = None
+        return []
+
+    # Embed & build FAISS
+    doc_embeddings = embedder.encode(new_docs, convert_to_numpy=True)
+    dim = int(doc_embeddings.shape[1])
+    faiss_index = faiss.IndexFlatL2(dim)
+    faiss_index.add(np.asarray(doc_embeddings, dtype=np.float32))
+
+    documents = new_docs
+    index = faiss_index
+    return [os.path.basename(p) for p in txt_paths]
+
+# Call once at import
+loaded_reg_files = reload_regulations("Regulations")
 
 def rag_answer(row_dict, term_text, top_k=3):
     feature_id = row_dict.get('feature_id')
@@ -107,17 +135,17 @@ def rag_answer(row_dict, term_text, top_k=3):
 
 def rag_answer2(response1,term_text, past_records):
     if len(past_records)>100:
-        text_documents = [json.loads(past_records) for item in json_text_list]
-        embeddings = embedder.encode(text_documents, convert_to_numpy=True)
-        dimension = embeddings.shape[1]
-        index = faiss.IndexFlatL2(dimension)
-        index.add(embeddings)
-        feature_name = response1.get("feature_name")
-        feature_description = response1.get("feature_description")
-        query = f"{feature_name}\n{feature_description}"
-        query_embedding = embedder.encode([query], convert_to_numpy=True)
-        D, I = index.search(np.array(query_embedding), 50)
-        retrieved_docs = [documents[i] for i in I[0]]  # Full JSON dicts
+        past_texts = [json.dumps(pr, ensure_ascii=False) for pr in past_records]
+        emb = embedder.encode(past_texts, convert_to_numpy=True)
+        dim = int(emb.shape[1])
+        local_idx = faiss.IndexFlatL2(dim)
+        local_idx.add(np.asarray(emb, dtype=np.float32))
+
+        q = f"{response1.get('feature_name','')}\n{response1.get('feature_description','')}".strip()
+        q_emb = embedder.encode([q], convert_to_numpy=True)
+        k = min(50, len(past_records))
+        D, I = local_idx.search(np.asarray(q_emb, dtype=np.float32), k)
+        retrieved = [past_records[i] for i in I[0]]
     else:
         retrieved_docs = past_records
     prompt = f"""

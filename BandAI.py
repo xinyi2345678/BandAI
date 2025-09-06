@@ -22,13 +22,11 @@ from dotenv import load_dotenv
 # Similarity threshold for “copy from precedent”
 SIM_THRESHOLD_DEFAULT = 0.88
 
-
 from PIL import Image
 import gspread
 from google.oauth2.service_account import Credentials
 from gspread_dataframe import set_with_dataframe
 from AI_main import *
-
 
 # -----------------------------------------------------------
 # Validators (strict schema enforcement)
@@ -93,16 +91,7 @@ def enforce_schema(data: dict, allowed_regs: list[str]) -> dict:
     norm = _coerce_violation_regs(norm, allowed_regs)
     return norm
 
-
-
 # -----------------------------------------------------------
-# Utilities & Config
-# -----------------------------------------------------------
-# Best practice: put your service account JSON into st.secrets["gcp_service_account"].
-# Fallback to inline dict if needed (NOT RECOMMENDED for public repos).
-
-
-
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive",
@@ -118,34 +107,6 @@ ALLOWED_REGS_DEFAULT = [
     "US law on reporting child sexual abuse content to NCMEC -  Reporting requirements of providers",
     "None",
 ]
-
-# -----------------------------------------------------------
-# Detectors
-# -----------------------------------------------------------
-def static_code_like_scan(text: str) -> list[str]:
-    signals = []
-    if re.search(r"\b(EU|EEA|GDPR|DSA|California|Utah|Florida|minors|under\s*18)\b", text, re.I):
-        signals.append("geo_or_minor_ref")
-    return signals
-
-def config_like_scan(text: str) -> list[str]:
-    hits = []
-    if re.search(r"enabled_countries|age_limit|curfew", text, re.I):
-        hits.append("config_geo_rule")
-    return hits
-
-def runtime_like_scan(text: str) -> list[str]:
-    hits = []
-    if re.search(r"blocked|retention|audit log", text, re.I):
-        hits.append("runtime_trace")
-    return hits
-
-def combined_detectors(text: str) -> list[str]:
-    signals = []
-    signals += static_code_like_scan(text)
-    signals += config_like_scan(text)
-    signals += runtime_like_scan(text)
-    return signals
 
 # -----------------------------------------------------------
 # Auth & Sheets IO
@@ -272,11 +233,6 @@ def log_event(event: str, feature: dict | None = None, before: dict | None = Non
 def _model_name_cached(name: str) -> str:
     return name
 
-def call_gemini(prompt: str, model_name: str) -> str:
-    model = GenerativeModel(_model_name_cached(model_name))
-    resp = model.generate_content(prompt)
-    return resp.text or ""
-
 # -----------------------------------------------------------
 # Parsing uploads → canonical JSON/text blocks
 # -----------------------------------------------------------
@@ -388,61 +344,6 @@ def parse_features(
     df = pd.DataFrame(out_rows)
     json_text = json.dumps(out_rows, ensure_ascii=False, indent=2)
     return df, json_text
-
-# -----------------------------------------------------------
-# Prompts (Single AI)
-# -----------------------------------------------------------
-
-def ai1_prompt(
-    feature_row: dict,
-    terminology_json_text: str,
-    regulations_text: str,
-    detector_signals: List[str],
-    allowed_regs: List[str],
-) -> str:
-    allowed_str = ", ".join(sorted(set(allowed_regs)))
-
-    schema = f"""
-Return ONLY valid JSON exactly as:
-{{
-  "feature_id": "<string or number>",
-  "feature_name": "<short title if available or derive from description>",
-  "feature_description": "<original text>",
-  "violation": "<Yes|No|Unclear>",
-  "confidence_level": <number>,  // 0.0–1.0
-  "reason": "<concise explanation>",
-  "regulations": ["<values ONLY from: {allowed_str}>"]
-}}
-""".strip()
-
-    det = f"[DETECTORS] {', '.join(detector_signals)}" if detector_signals else "[DETECTORS] none"
-
-    return f"""
-You are AI_1, a conservative geo-compliance detector.
-Use only the provided Terminology JSON and Regulations text as context.
-
-STRICT RULES FOR "violation":
-- If the feature description or detectors mention any terminology, region, minors, or regulation that could relate to compliance → output "Yes".
-- Output "No" only if you are highly confident the feature has NOTHING to do with compliance or regulations.
-- Output "Unclear" only if the description is so vague that you cannot reasonably decide.
-
-Use only these regulation labels in the output (exact match): {allowed_str}. If none apply, use ["None"].
-
-[TERMINOLOGY JSON]
-{terminology_json_text}
-
-[REGULATIONS TEXT]
-{regulations_text}
-
-{det}
-
-[FEATURE]
-feature_id: {feature_row.get('feature_id')}
-feature_name: {feature_row.get('feature_name', '')}
-feature_description: {feature_row.get('feature_description')}
-
-{schema}
-""".strip()
 
 # -----------------------------------------------------------
 # Streamlit App — UI
@@ -636,11 +537,43 @@ with st.sidebar:
     st.subheader("1) Upload Terminology")
     term_upload = st.file_uploader("Terminology (CSV/XLSX)", type=["csv", "xlsx"])
 
-
     st.subheader("2) Features Source")
     features_file = st.file_uploader("Features (CSV/XLSX with feature_name, feature_description)", type=["csv", "xlsx"])
     st.caption("Or paste lines below as: Name: Description")
+    
+    st.subheader("3) Regulations (.txt)")
+    regs_uploads = st.file_uploader(
+        "Upload regulation files (TXT only)",
+        type=["txt"], accept_multiple_files=True, key="regs_txt_uploader"
+    )
 
+    if st.button("💾 Save to Regulations/ and refresh RAG", type="primary", use_container_width=True):
+        saved_names = []
+        try:
+            os.makedirs("Regulations", exist_ok=True)
+            if regs_uploads:
+                for f in regs_uploads:
+                    # normalize filename
+                    safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", f.name.strip()) or "regulations.txt"
+                    path = os.path.join("Regulations", safe_name)
+                    content = f.getvalue()
+                    # ensure bytes
+                    if isinstance(content, str):
+                        content = content.encode("utf-8", errors="replace")
+                    with open(path, "wb") as out:
+                        out.write(content)
+                    saved_names.append(safe_name)
+
+            # refresh AI_main memory + index
+            loaded = reload_regulations("Regulations")
+            st.success(f"Refreshed RAG with {len(loaded)} regulation file(s).")
+            if saved_names:
+                st.info("Saved: " + ", ".join(saved_names))
+
+            # cache a copy to show below
+            st.session_state.LOADED_REG_FILES = loaded
+        except Exception as e:
+            st.error(f"Save/refresh failed: {e}")
 
 st.markdown("---")
 
@@ -681,10 +614,20 @@ if st.session_state["clear_button"]:
         st.text("Please reload the whole session after Confirm Clear button")
 term_df, terminology_json_text = parse_terminology_upload(term_upload)
 
-
-
-
-regulations_text = "placeholder so it works"
+st.markdown("### 📚 Regulations loaded")
+loaded_regs = st.session_state.get("LOADED_REG_FILES")
+if loaded_regs is None:
+    try:
+        from AI_main import loaded_reg_files
+        loaded_regs = loaded_reg_files
+    except Exception:
+        loaded_regs = []
+if not loaded_regs:
+    st.info("No regulation files are currently loaded.")
+else:
+    st.success(f"{len(loaded_regs)} regulation file(s) loaded.")
+    with st.expander("Show files"):
+        st.write("\n".join(f"• {x}" for x in loaded_regs))
 
 # Features
 st.header("B) Features input")
@@ -700,9 +643,11 @@ else:
 st.download_button("⬇️ Download combined_feature.json", data=combined_feature_json, file_name="combined_feature.json", mime="application/json")
 
 # Guard before run
-can_run = bool(features_df.shape[0]) and bool(terminology_json_text) and bool(regulations_text)
+has_regs = bool(documents)
+can_run = (features_df.shape[0] > 0) and bool(terminology_json_text) and has_regs
+
 if not can_run:
-    st.warning("To run AI_1, please provide: Terminology CSV/XLSX, Regulations TXT, and at least one Feature.")
+    st.warning("To run AI_1, please provide: Terminology CSV/XLSX, and at least one Feature.")
 
 # Run AI_1
 st.header("C) Run Compliance Detection (AI_1)")
@@ -720,7 +665,6 @@ if run_btn:
             "feature_description": str(row.get("feature_description", "")),
         }
         try:
-            det_signals = combined_detectors(r["feature_description"])  # optional evidence
             raw = rag_answer(r,terminology_json_text)
             data = None
             if raw:
@@ -826,6 +770,29 @@ if st.session_state.RESULTS_READY and st.session_state.AI1_DF is not None:
         # make editable copy (merge reason+reason2; stringify regs)
         edit_df = ai2_df.copy()
 
+        # --- Normalize columns before editor ---
+        # violation: only three
+        valid_v_choices = ["Yes", "No", "Unclear"]
+        edit_df["violation"] = edit_df["violation"].apply(lambda v: v if v in valid_v_choices else "Unclear")
+
+        # confidence_level: coerce to number
+        edit_df["confidence_level"] = pd.to_numeric(edit_df.get("confidence_level", 0), errors="coerce").fillna(0.0)
+
+        # regulations: ensure list[str] in-memory (editor will show as comma string, we’ll parse on save)
+        def _to_list(v):
+            if isinstance(v, list):
+                return v
+            s = "" if v is None else str(v)
+            try:
+                j = json.loads(s)
+                if isinstance(j, list):
+                    return [str(x) for x in j]
+            except Exception:
+                pass
+            return [t.strip() for t in s.split(",") if t.strip()]
+
+        edit_df["regulations"] = edit_df["regulations"].apply(_to_list)
+
         def _merge_reasons(a, b):
             a = str(a or "").strip()
             b = str(b or "").strip()
@@ -843,7 +810,6 @@ if st.session_state.RESULTS_READY and st.session_state.AI1_DF is not None:
 
         # keep UI expanded after rerun
         st.session_state.AI2_EXPANDED = True
-
 
 # -------- Helpers (defined once, used on submit) ----------
 def _save_ai2_corrections(edited_df: pd.DataFrame):
@@ -967,10 +933,22 @@ if st.session_state.get("AI2_DF") is not None and st.session_state.get("ai2_edit
         # Use a form so edits don’t change session state until Save is pressed
         with st.form("ai2_edit_form", clear_on_submit=False):
             edited_df = st.data_editor(
-                src,
+                edit_df,
                 key="ai2_editor_table",
                 use_container_width=True,
-                num_rows="fixed",     # ⛔ no row add/remove
+                num_rows="fixed",
+                column_config={
+                    "violation": st.column_config.SelectboxColumn(
+                        "violation", options=valid_v_choices, help="Pick Yes, No, or Unclear"
+                    ),
+                    # ListColumn works in recent Streamlit; if your version is older, this still renders as text.
+                    "regulations": st.column_config.ListColumn(
+                        "regulations", help="Pick labels. If violation=No, this will be forced to ['None'] on save."
+                    ),
+                    "confidence_level": st.column_config.NumberColumn(
+                        "confidence_level", min_value=0.0, max_value=2.0, step=0.1, help="Set to 2 to mark human override"
+                    ),
+                },
             )
             submitted = st.form_submit_button("💾 Save corrections to memory", type="primary")
 
