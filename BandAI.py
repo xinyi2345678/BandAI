@@ -1041,12 +1041,16 @@ if st.session_state.get("AI2_DF") is not None and st.session_state.get("ai2_edit
         base_df["regulations"] = base_df["regulations"].apply(_to_list)
 
         # Show only the key columns for editing
-        edit_df = base_df[["feature_id","feature_name","feature_description","violation","confidence_level","reason","regulations"]].copy()
-        edit_df["regulations"] = (
-            edit_df["regulations"]
-            .apply(lambda v: ", ".join(v) if isinstance(v, list) else ("" if v is None else str(v)))
-            .astype("string")   # force pandas StringDtype (helps Streamlit infer TEXT)
+        edit_df = base_df[[
+            "feature_id", "feature_name", "feature_description",
+            "violation", "confidence_level", "reason", "regulations"
+        ]].copy()
+
+        # <-- NEW: present regs as a single text field
+        edit_df["regulations_text"] = edit_df["regulations"].apply(
+            lambda xs: ", ".join(xs) if isinstance(xs, list) else (xs or "")
         )
+        edit_df = edit_df.drop(columns=["regulations"])
         # Dynamic options = names from folder (without .txt). We let user pick those;
         # "None" is enforced automatically on save when violation == "No".
         allowed_opts_for_editor = [r for r in ALLOWED_REGS if r != "None"]
@@ -1063,11 +1067,9 @@ if st.session_state.get("AI2_DF") is not None and st.session_state.get("ai2_edit
                         options=valid_v_choices,
                         help="Pick Yes or No"
                     ),
-                    "regulations": st.column_config.TextColumn(
-                        "regulations",
-                        help="Comma-separated. Allowed values: "
-                            + ", ".join(ALLOWED_REGS) +
-                            ". If violation=No, it will be forced to ['None'] on save."
+                    "regulations_text": st.column_config.TextColumn(
+                        "regulations (comma-separated)",
+                        help="Type names separated by commas. Allowed: " + ", ".join([r for r in ALLOWED_REGS if r != "None"])
                     ),
                     "confidence_level": st.column_config.NumberColumn(
                         "confidence_level",
@@ -1079,20 +1081,13 @@ if st.session_state.get("AI2_DF") is not None and st.session_state.get("ai2_edit
             submitted = st.form_submit_button("💾 Save corrections to memory", type="primary")
 
         if submitted:
+            # Map text -> list inside _save_ai2_corrections; here just rename
+            edited_df = edited_df.copy()
+            edited_df.rename(columns={"regulations_text": "regulations"}, inplace=True)
+
             st.session_state.AI_2_EXPANDED = True
             st.session_state["ai2_editor_source"] = edited_df.copy(deep=True)
-            _save_ai2_corrections(edited_df)  # uses ALLOWED_REGS in your enforcement
-
-            # Refresh Needs Review
-            def _recompute_needs_review():
-                df = st.session_state.get("AI2_DF")
-                if df is None or df.empty:
-                    st.session_state.NEEDS_REVIEW = pd.DataFrame()
-                else:
-                    conf = pd.to_numeric(df.get("confidence_level", 0), errors="coerce").fillna(0.0)
-                    st.session_state.NEEDS_REVIEW = df[conf < 0.3]
-            _recompute_needs_review()
-
+            _save_ai2_corrections(edited_df)
             st.toast("Saved corrections. Tables updated below.", icon="✅")
 
     # 3) Needs Review — always recompute so it updates immediately after save

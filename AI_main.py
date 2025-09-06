@@ -85,13 +85,12 @@ def rag_answer(row_dict, term_text, top_k=3):
 
     prompt = f"""
 You are a compliance assistant. Decide if the feature violates listed regulations.
-    If you think it violates, you must return the relevant regulation(s) that the feature violates. 
-However, if you are unable to find at least 1 relevant regulation, return no, but state why you think it violates even though you can't find the regulation that is being violated.
 
 Hard rules:
 - "violation" MUST be either "Yes" or "No".
-- reason must be a carefully thought and concise explanation of why you think it is a violation or not.
-- If "violation" == "Yes", you MUST include at least one regulation name from the ALLOWED LIST below.
+- Reason must be a carefully thought and concise explanation of why you think it is a violation or not.
+- If Yes, you must return the relevant regulation(s) that the feature violates. However, if you think it's a violation but you unable to find at least 1 relevant regulation, return no, but state why you think it violates.
+- If No, you must explain why the feature does not violate any regulations.
 - You are ONLY allowed to return regulation names from the ALLOWED LIST below. Do NOT invent new names.
 - If you cannot cite at least one allowed regulation, set "violation": "No" and "regulations": ["None"].
 
