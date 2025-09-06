@@ -840,64 +840,44 @@ def _save_ai2_corrections(edited_df: pd.DataFrame):
         return
 
     allowed = ALLOWED_REGS
-    real_labels = [x for x in allowed if x != "None"]  # “None” is sentinel
-
+    real_labels = [x for x in allowed if x != "None"]
     base_df = st.session_state.AI2_FULL_DF
     base_map = base_df.assign(_fid=base_df["feature_id"].astype(str)).set_index("_fid")
 
     ui_df = edited_df.copy()
     saved = 0
     prec_rows = st.session_state.get("PRECEDENT_ROWS", [])
-
-    bad_rows = []  # accumulate errors for feedback
+    bad_rows = []
 
     for _, ui_row in ui_df.iterrows():
         try:
             fid = str(ui_row.get("feature_id"))
             if fid not in base_map.index:
-                bad_rows.append((fid, "Unknown feature_id"))
-                continue
+                bad_rows.append((fid, "Unknown feature_id")); continue
 
-            # Human override must be explicit
+            # Only persist rows explicitly marked as human
             conf_val = sanitize_confidence(ui_row.get("confidence_level", 0.0))
             if conf_val != 2:
-                # skip silently; only rows marked 2 are persisted
                 continue
 
-            # Pull & sanitize fields
             v = sanitize_violation(ui_row.get("violation", "Unclear"))
 
-            regs_val = ui_row.get("regulations", [])
-            if isinstance(regs_val, str):
-                # support either JSON or comma-separated
-                try:
-                    maybe = json.loads(regs_val)
-                    regs = maybe if isinstance(maybe, list) else [regs_val]
-                except Exception:
-                    regs = [r.strip() for r in regs_val.split(",") if r.strip()]
-            elif isinstance(regs_val, list):
-                regs = [str(r).strip() for r in regs_val if str(r).strip()]
+            # regs can be "a, b" or a list
+            regs_val = ui_row.get("regulations", "")
+            if isinstance(regs_val, list):
+                tokens = [str(x) for x in regs_val]
             else:
-                regs = []
+                tokens = [t.strip() for t in str(regs_val or "").split(",") if t.strip()]
+            regs = sanitize_regulations_dynamic(tokens, allowed)
 
-            # Map to allowed; keep “None” only if it is the only thing and v == No
-            regs = sanitize_regulations_dynamic(regs, allowed)
-
-            # ---------- HARD RULES ----------
             if v == "No":
-                # Must be exactly ["None"]
                 regs = ["None"]
+            elif v == "Yes" and not any(r in real_labels for r in regs):
+                bad_rows.append((fid, "Violation=Yes requires at least one real regulation (not 'None')."))
+                continue
 
-            elif v == "Yes":
-                # Must include at least one real label (not “None”)
-                has_real = any(r in real_labels for r in regs)
-                if not has_real:
-                    bad_rows.append((fid, "Violation=Yes requires at least one real regulation (not 'None')."))
-                    continue  # do not save this row
-
-            # Build final normalized record
             row_before = base_map.loc[fid].to_dict()
-            cleaned = {
+            final_norm = enforce_schema({
                 "feature_id": ui_row.get("feature_id"),
                 "feature_name": ui_row.get("feature_name"),
                 "feature_description": ui_row.get("feature_description"),
@@ -905,65 +885,50 @@ def _save_ai2_corrections(edited_df: pd.DataFrame):
                 "confidence_level": 2,   # explicit human override
                 "reason": str(ui_row.get("reason", "") or ""),
                 "regulations": regs,
-            }
-
-            final_norm = enforce_schema(cleaned, allowed)
+            }, allowed)
             final_norm = _coerce_violation_regs(final_norm, allowed)
             final_norm["confidence_level"] = 2
 
-            # Update precedent memory
-            prec_rows.append({
-                "feature_id": str(final_norm["feature_id"]),
-                "feature_name": final_norm["feature_name"],
-                "feature_description": final_norm["feature_description"],
-                "violation": final_norm["violation"],
-                "confidence_level": final_norm["confidence_level"],
-                "reason": final_norm["reason"],
-                "regulations": final_norm["regulations"],
-            })
-
-            # Reflect changes into AI2_FULL_DF
+            # ---- WRITE BACK (safe for list columns) ----
             mask = (st.session_state.AI2_FULL_DF["feature_id"].astype(str) == fid)
-            row_count = int(mask.sum())
+            idx = st.session_state.AI2_FULL_DF.index[mask]
+            row_count = len(idx)
             if row_count == 0:
-                bad_rows.append((fid, "Unknown feature_id"))
-                continue
+                bad_rows.append((fid, "Unknown feature_id")); continue
 
-            # Scalars broadcast fine to multiple rows
-            st.session_state.AI2_FULL_DF.loc[mask, "violation"] = final_norm["violation"]
-            st.session_state.AI2_FULL_DF.loc[mask, "confidence_level"] = final_norm["confidence_level"]
-            st.session_state.AI2_FULL_DF.loc[mask, "reason"] = final_norm["reason"]
+            st.session_state.AI2_FULL_DF.loc[idx, "violation"] = final_norm["violation"]
+            st.session_state.AI2_FULL_DF.loc[idx, "confidence_level"] = 2
+            st.session_state.AI2_FULL_DF.loc[idx, "reason"] = final_norm["reason"]
+            # <-- critical line: assign a Series that matches the masked index
+            st.session_state.AI2_FULL_DF.loc[idx, "regulations"] = pd.Series(
+                [list(final_norm["regulations"])] * row_count, index=idx
+            )
 
-            # For the list-typed column, repeat the list for each matching row
-            st.session_state.AI2_FULL_DF.loc[mask, "regulations"] = [final_norm["regulations"]] * row_count
-
-            # Update the editor source mirror
-            mask_src = st.session_state["ai2_editor_source"]["feature_id"].astype(str) == fid
+            # Mirror the editor (string form)
+            mask_src = (st.session_state["ai2_editor_source"]["feature_id"].astype(str) == fid)
             st.session_state["ai2_editor_source"].loc[mask_src, "violation"] = final_norm["violation"]
-            st.session_state["ai2_editor_source"].loc[mask_src, "confidence_level"] = final_norm["confidence_level"]
+            st.session_state["ai2_editor_source"].loc[mask_src, "confidence_level"] = 2
             st.session_state["ai2_editor_source"].loc[mask_src, "reason"] = final_norm["reason"]
             st.session_state["ai2_editor_source"].loc[mask_src, "regulations"] = ", ".join(final_norm["regulations"])
 
             # Timelog
-            feature_ctx = {
-                "feature_id": final_norm.get("feature_id"),
-                "feature_name": final_norm.get("feature_name"),
-                "feature_description": final_norm.get("feature_description"),
-            }
             before_norm = enforce_schema({**row_before, "regulations": row_before.get("regulations", [])}, allowed)
-            log_event("human_intervention", feature=feature_ctx, before=before_norm, after=final_norm, note="Reviewer set confidence_level=2")
+            log_event("human_intervention",
+                      feature={"feature_id": final_norm["feature_id"],
+                               "feature_name": final_norm["feature_name"],
+                               "feature_description": final_norm["feature_description"]},
+                      before=before_norm, after=final_norm,
+                      note="Reviewer set confidence_level=2")
             saved += 1
 
         except Exception as e:
             bad_rows.append((str(ui_row.get("feature_id")), f"Unexpected error: {e}"))
             continue
 
-    # Persist memory & rebuild tf-idf index once
     st.session_state.PRECEDENT_ROWS = prec_rows
     build_precedent_index(pd.DataFrame(prec_rows), ALLOWED_REGS)
     st.session_state.AI2_DF = st.session_state.AI2_FULL_DF.copy()
 
-    # Update DASHBOARD snapshot
     dash_df = st.session_state.AI2_FULL_DF.copy()
     dash_df["feature_id"] = dash_df["feature_id"].astype(str)
     dash_df["regulations"] = dash_df["regulations"].apply(lambda x: ", ".join(x) if isinstance(x, list) else str(x))
@@ -977,6 +942,7 @@ def _save_ai2_corrections(edited_df: pd.DataFrame):
         st.error(f"Some rows were NOT saved due to rule violations:\n{msgs}")
     if saved:
         st.success(f"Saved {saved} row(s) with human overrides.")
+
 
 # -------- Render phase: always show if data exists ----------
 def _recompute_needs_review():
