@@ -54,83 +54,86 @@ def reload_regulations(folder: str = "Regulations") -> list[str]:
 
 # Call once at import
 loaded_reg_files = reload_regulations("Regulations")
+def _allowed_reg_names() -> list[str]:
+    # Take basenames from loaded_reg_files, drop ".txt"
+    names = []
+    for fn in (loaded_reg_files or []):
+        base = os.path.splitext(os.path.basename(fn))[0]
+        if base:
+            names.append(base.strip())
+    names = sorted(set(n for n in names if n))
+    # Always allow "None"
+    return (names + ["None"]) if names else ["None"]
 
 def rag_answer(row_dict, term_text, top_k=3):
     feature_id = row_dict.get('feature_id')
     feature_name = row_dict.get('feature_name', '')
     feature_description = row_dict.get('feature_description')
-    query = feature_name + "\n" + feature_description
-    # Embed the query
-    query_embedding = embedder.encode([query], convert_to_numpy=True)
-    # Retrieve top_k documents
-    D, I = index.search(np.array(query_embedding), top_k)
-    retrieved_docs = [documents[i] for i in I[0]]
-    # Concatenate context
-    context = "\n".join(retrieved_docs)
-    
-    # Build prompt
+    query = (feature_name or "").strip() + "\n" + (feature_description or "").strip()
+
+    # Optional RAG retrieval
+    context = ""
+    if index is not None and documents:
+        query_embedding = embedder.encode([query], convert_to_numpy=True).astype(np.float32)
+        k = min(top_k, len(documents))
+        D, I = index.search(query_embedding, k)
+        retrieved_docs = [documents[i] for i in I[0] if 0 <= i < len(documents)]
+        context = "\n".join(retrieved_docs)
+
+    allowed = _allowed_reg_names()
+    allowed_lines = "\n".join(f"- \"{a}\"" for a in allowed)
+
     prompt = f"""
-    You are a compliance assistant. Your job is to check if a software feature violates any of the regulations listed above. 
+You are a compliance assistant. Decide if the feature violates listed regulations.
+    If you think it violates, you must return the relevant regulation(s) that the feature violates. 
+However, if you are unable to find at least 1 relevant regulation, return no, but state why you think it violates even though you can't find the regulation that is being violated.
 
-    If you think it violates, you must return the relevant regulation(s) that the feature violates. However, if you are unable to find atleast 1 relevant regulation, return no, but state why you think it violates even though you can't find the regulation that is being violated.
+Hard rules:
+- "violation" MUST be either "Yes" or "No".
+- reason must be a carefully thought and concise explanation of why you think it is a violation or not.
+- If "violation" == "Yes", you MUST include at least one regulation name from the ALLOWED LIST below.
+- You are ONLY allowed to return regulation names from the ALLOWED LIST below. Do NOT invent new names.
+- If you cannot cite at least one allowed regulation, set "violation": "No" and "regulations": ["None"].
 
-    The list of regulations that you might or might not be given is:
-    "EU Digital Services Act (DSA)",
-    "California state law - Protecting Our Kids from Social Media Addiction Act",
-    "Florida state law - Online Protections for Minors",
-    "Utah Social Media Regulation Act",
-    "US law on reporting child sexual abuse content to NCMEC -  Reporting requirements of providers",
-    "None"
+ALLOWED REGULATION NAMES:
+{allowed_lines}
 
-    You must give the exact name(s) stated in the list of regulations when returning the relevant regulation(s) that the feature violates.
-    If there is no violations, you should be returning "None" for regulations.
-    Return ONLY valid JSON exactly as:
-    {{
-        "feature_id": original id of the feature,
-        "feature_name": "<short title if available or derive from description>",
-        "feature_description": "<original text>",
-        "violation": "<Yes|No|Unclear>",
-        "reason": "<concise explanation>",
-        "confidence_level": your confidence level between 0 and 1 (inclusive)
-        "regulations": list of regulation(s) being violated
-    }}
-    Terminologies in json:
-    {term_text}
-    
-    Regulations:
-    {context}
-    
-    feature_id:
-    {feature_id}
-    
-    feature_name:
-    {feature_name}
-    
-    feature_description:
-    {feature_description}
-    
-    Answer:
-    Return ONLY valid JSON exactly as:
-    {{
-        "feature_id": original id of the feature,
-        "feature_name": "<short title if available or derive from description>",
-        "feature_description": "<original text>",
-        "violation": "<Yes|No>",
-        "reason": "<concise explanation>",
-        "confidence_level": your confidence level between 0 and 1 (inclusive)
-        "regulations": list of regulation(s) being violated
-    }}
-    """
+Return ONLY valid JSON exactly as:
+{{
+  "feature_id": <original id>,
+  "feature_name": "<short title if available or derive from description>",
+  "feature_description": "<original text>",
+  "violation": "<Yes|No>",
+  "reason": "<concise explanation>",
+  "confidence_level": <number between 0 and 1 inclusive>,
+  "regulations": [list of allowed regulation names OR ["None"]]
+}}
 
+Terminologies in json:
+{term_text}
+
+Regulations (may be empty if none provided):
+{context}
+and "None".
+
+feature_id:
+{feature_id}
+
+feature_name:
+{feature_name}
+
+feature_description:
+{feature_description}
+"""
     response = client.chat.completions.create(
-    model="ft:gpt-4.1-mini-2025-04-14:personal:bandai:CAEAHbEe",
-    messages=[
-        {"role": "system", "content": "You are a compliance assistant. Your job is to check if a new feature violates any of the regulations listed."},
-        {"role": "user", "content": prompt}
-    ]
+        model="ft:gpt-4.1-mini-2025-04-14:personal:bandai:CAEAHbEe",
+        messages=[
+            {"role": "system", "content": "You are a compliance assistant. Determine Yes/No and cite only ALLOWED regulation names."},
+            {"role": "user", "content": prompt}
+        ]
     )
-
     return response.choices[0].message.content
+
 
 
 def rag_answer2(response1,term_text, past_records):

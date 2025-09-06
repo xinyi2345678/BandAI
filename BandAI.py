@@ -99,14 +99,6 @@ SCOPES = [
 
 SERVICE_ACCOUNT_INFO_DICT = st.secrets["SERVICE_ACCOUNT_INFO"]
 SPREADSHEET_ID = st.secrets["SPREADSHEET_ID"]
-ALLOWED_REGS_DEFAULT = [
-    "EU Digital Services Act (DSA)",
-    "California state law - Protecting Our Kids from Social Media Addiction Act",
-    "Florida state law - Online Protections for Minors",
-    "Utah Social Media Regulation Act",
-    "US law on reporting child sexual abuse content to NCMEC -  Reporting requirements of providers",
-    "None",
-]
 
 # -----------------------------------------------------------
 # Auth & Sheets IO
@@ -393,12 +385,8 @@ with col2:
 with col3:
     st.markdown("")
     
-
-
 st.title("🛡️ Geo-Reg Compliance Checker — DUO AI POWERED BY RAG")
-
 st.link_button("Click to open Looker Studio Visualisation by Google Analytics", url = "https://lookerstudio.google.com/reporting/e081e397-63bd-4000-9227-893fc9d86033")
-
 
 # Session defaults
 defaults = {
@@ -445,7 +433,7 @@ def _prep_text(name: str, desc: str) -> str:
     desc = (desc or "").strip()
     return f"{name}\n{desc}".strip()
 
-def build_precedent_index(dashboard_df: pd.DataFrame):
+def build_precedent_index(dashboard_df: pd.DataFrame, allowed_regs: list[str]):
     """
     Vectorize past rows for nearest-neighbor lookup by feature text.
     Stores into session:
@@ -477,7 +465,7 @@ def build_precedent_index(dashboard_df: pd.DataFrame):
                 "violation": sanitize_violation(r.get("violation", "")),
                 "confidence_level": sanitize_confidence(r.get("confidence_level", 0.0)),
                 "reason": str(r.get("reason", "")),
-                "regulations": sanitize_regulations_dynamic(regs_list, ALLOWED_REGS_DEFAULT),
+                "regulations": sanitize_regulations_dynamic(regs_list, allowed_regs),
             })
 
     texts = [_prep_text(x["feature_name"], x["feature_description"]) for x in rows]
@@ -492,7 +480,6 @@ def build_precedent_index(dashboard_df: pd.DataFrame):
         st.session_state.PRECEDENT_VEC = None
         st.session_state.PRECEDENT_MAT = None
 
-build_precedent_index(st.session_state.EXISTING_DASH)
 
 def find_similar_precedents(feature_text: str, top_k: int = 3) -> list[tuple[float, dict]]:
     vec = st.session_state.get("PRECEDENT_VEC")
@@ -536,12 +523,18 @@ def ai2_from_precedent(ai1_json: dict, allowed_regs: list[str], sim_threshold: f
 with st.sidebar:
     st.subheader("1) Upload Terminology")
     term_upload = st.file_uploader("Terminology (CSV/XLSX)", type=["csv", "xlsx"])
+    term_df, terminology_json_text = parse_terminology_upload(term_upload)
+    st.session_state["TERMINOLOGY_DF"] = term_df
+    st.session_state["TERMINOLOGY_JSON_TEXT"] = terminology_json_text
+
+    if term_df is not None and not term_df.empty:
+        st.caption(f"Loaded {len(term_df)} terminology rows.")
 
     st.subheader("2) Features Source")
     features_file = st.file_uploader("Features (CSV/XLSX with feature_name, feature_description)", type=["csv", "xlsx"])
     st.caption("Or paste lines below as: Name: Description")
     
-    st.subheader("3) Regulations (.txt)")
+    st.subheader("3) Regulations (.txt) -- Optional")
     regs_uploads = st.file_uploader(
         "Upload regulation files (TXT only)",
         type=["txt"], accept_multiple_files=True, key="regs_txt_uploader"
@@ -575,44 +568,61 @@ with st.sidebar:
         except Exception as e:
             st.error(f"Save/refresh failed: {e}")
 
-st.markdown("---")
+# --- Clear sheets with two-step confirm ---
+if "clear_button_armed" not in st.session_state:
+    st.session_state.clear_button_armed = False
 
-# Terminology
-st.markdown("### ⚠️ Dangerous Actions")
+# Step 1: arm the clear
+if st.button("🧹 Clear DASHBOARD + TIMELOGS (keep headers)", type="secondary", key="btn_clear_arm"):
+    st.session_state.clear_button_armed = True
 
+# Step 2: show confirm UI only while armed
+if st.session_state.clear_button_armed:
+    st.warning(
+        "This will ERASE all rows below the header in both sheets. "
+        "This cannot be undone. Click confirm if you're sure.",
+        icon="⚠️"
+    )
+    c1, c2 = st.columns(2)
 
-if "clear_button" not in st.session_state:
-    st.session_state["clear_button"] = False
-if st.button("🧹 Clear DASHBOARD + TIMELOGS (keep headers)", type="secondary"):
-    st.session_state["clear_button"] = True
-    st.warning("This will ERASE all rows below the header in both sheets. This cannot be undone. Click confirm if you're sure.", icon="⚠️")
-
-if st.session_state["clear_button"]:
-    if st.button("✅ Confirm Clear", type="primary"):
-        st.session_state["clear_button"] = False
-        try:
-            gc = _gc_from_dict()
-            sh = gc.open_by_key(SPREADSHEET_ID)
-
-            # Clear DASHBOARD rows from row 2 onwards
+    with c1:
+        if st.button("✅ Confirm Clear", type="primary", key="btn_clear_confirm"):
             try:
-                ws_dash = sh.worksheet("DASHBOARD")
-                ws_dash.batch_clear(["A2:Z"])   # adjust cols if wider
-            except gspread.WorksheetNotFound:
-                st.info("DASHBOARD sheet not found, skipped.")
+                gc = _gc_from_dict()
+                sh = gc.open_by_key(SPREADSHEET_ID)
 
-            # Clear TIMELOGS rows from row 2 onwards
-            try:
-                ws_logs = sh.worksheet("TIMELOGS")
-                ws_logs.batch_clear(["A2:Z"])   # adjust cols if wider
-            except gspread.WorksheetNotFound:
-                st.info("TIMELOGS sheet not found, skipped.")
+                for sheet_name in ("DASHBOARD", "TIMELOGS"):
+                    try:
+                        ws = sh.worksheet(sheet_name)
+                        ws.batch_clear(["A2:Z"])
+                    except gspread.WorksheetNotFound:
+                        st.info(f"{sheet_name} sheet not found, skipped.")
 
-            st.success("✅ Cleared all rows (row 2 and below) in DASHBOARD + TIMELOGS.")
-        except Exception as e:
-            st.error(f"Failed to clear: {e}")
-        st.text("Please reload the whole session after Confirm Clear button")
-term_df, terminology_json_text = parse_terminology_upload(term_upload)
+                # Reset local session state
+                st.session_state.TIMELOGS = []
+                st.session_state.AI1_DF = None
+                st.session_state.AI2_DF = None
+                st.session_state.AI2_FULL_DF = None
+                st.session_state.DASHBOARD_READY = pd.DataFrame(columns=["feature_id","feature_name","feature_description","violation","reason","regulations"])
+                st.session_state.EXISTING_DASH = pd.DataFrame(columns=["feature_id","feature_name","feature_description","violation","reason","regulations"])
+                st.session_state.EXISTING_LOGS = pd.DataFrame(columns=[
+                    "ts","event","feature_id","feature_name","feature_description",
+                    "before_violation","before_confidence","before_regulations",
+                    "after_violation","after_confidence","after_regulations","note"
+                ])
+                st.cache_data.clear()
+                st.success("✅ Cleared DASHBOARD + TIMELOGS.")
+            except Exception as e:
+                st.error(f"Failed to clear: {e}")
+            finally:
+                # hide confirm UI after confirm
+                st.session_state.clear_button_armed = False
+
+    with c2:
+        if st.button("✖️ Cancel", type="secondary", key="btn_clear_cancel"):
+            st.info("Clear cancelled.")
+            # hide confirm UI after cancel
+            st.session_state.clear_button_armed = False
 
 st.markdown("### 📚 Regulations loaded")
 loaded_regs = st.session_state.get("LOADED_REG_FILES")
@@ -627,7 +637,22 @@ if not loaded_regs:
 else:
     st.success(f"{len(loaded_regs)} regulation file(s) loaded.")
     with st.expander("Show files"):
-        st.write("\n".join(f"• {x}" for x in loaded_regs))
+        for fn in loaded_regs:
+            st.markdown(f"• {fn}")
+
+# ---- Allowed regulations come from the Regulations/ folder + "None" ----
+def _allowed_regs_from_loaded(loaded_files: list[str]) -> list[str]:
+    names = []
+    for fn in (loaded_files or []):
+        base = os.path.splitext(os.path.basename(fn))[0]  # drop ".txt"
+        if base:
+            names.append(base.strip())
+    names = sorted(set(n for n in names if n))
+    # Always allow "None"
+    return (names + ["None"]) if names else ["None"]
+
+ALLOWED_REGS = _allowed_regs_from_loaded(loaded_regs)
+build_precedent_index(st.session_state.EXISTING_DASH, ALLOWED_REGS)
 
 # Features
 st.header("B) Features input")
@@ -644,16 +669,14 @@ st.download_button("⬇️ Download combined_feature.json", data=combined_featur
 
 # Guard before run
 has_regs = bool(documents)
-can_run = (features_df.shape[0] > 0) and bool(terminology_json_text) and has_regs
 
+can_run = (features_df.shape[0] > 0) and bool(terminology_json_text)
 if not can_run:
     st.warning("To run AI_1, please provide: Terminology CSV/XLSX, and at least one Feature.")
 
 # Run AI_1
 st.header("C) Run Compliance Detection (AI_1)")
 run_btn = st.button("▶️ Run with AI_1", disabled=not can_run)
-
-ALLOWED_REGS = ALLOWED_REGS_DEFAULT  # still provide a guardrail list
 
 if run_btn:
     rows_out = []
@@ -722,7 +745,7 @@ if st.session_state.RESULTS_READY and st.session_state.AI1_DF is not None:
 if st.session_state.RESULTS_READY and st.session_state.AI1_DF is not None:
 
     sim_threshold = 0.5
-    allowed = ALLOWED_REGS_DEFAULT
+    allowed = ALLOWED_REGS
 
     # -------- Compute phase: only when button is clicked ----------
     if st.button("▶️ Run AI_2 on AI_1 results"):
@@ -815,85 +838,129 @@ if st.session_state.RESULTS_READY and st.session_state.AI1_DF is not None:
 def _save_ai2_corrections(edited_df: pd.DataFrame):
     if st.session_state.get("AI2_FULL_DF") is None:
         return
-    allowed = ALLOWED_REGS_DEFAULT
-    base_df = st.session_state.AI2_FULL_DF
 
-    # Map by feature_id (string) for stability
+    allowed = ALLOWED_REGS
+    real_labels = [x for x in allowed if x != "None"]  # “None” is sentinel
+
+    base_df = st.session_state.AI2_FULL_DF
     base_map = base_df.assign(_fid=base_df["feature_id"].astype(str)).set_index("_fid")
 
     ui_df = edited_df.copy()
     saved = 0
     prec_rows = st.session_state.get("PRECEDENT_ROWS", [])
 
+    bad_rows = []  # accumulate errors for feedback
+
     for _, ui_row in ui_df.iterrows():
-        row_after_ui = ui_row.to_dict()
         try:
-            conf_val = float(row_after_ui.get("confidence_level", 0))
-        except Exception:
-            conf_val = 0.0
-        if conf_val != 2:
+            fid = str(ui_row.get("feature_id"))
+            if fid not in base_map.index:
+                bad_rows.append((fid, "Unknown feature_id"))
+                continue
+
+            # Human override must be explicit
+            conf_val = sanitize_confidence(ui_row.get("confidence_level", 0.0))
+            if conf_val != 2:
+                # skip silently; only rows marked 2 are persisted
+                continue
+
+            # Pull & sanitize fields
+            v = sanitize_violation(ui_row.get("violation", "Unclear"))
+
+            regs_val = ui_row.get("regulations", [])
+            if isinstance(regs_val, str):
+                # support either JSON or comma-separated
+                try:
+                    maybe = json.loads(regs_val)
+                    regs = maybe if isinstance(maybe, list) else [regs_val]
+                except Exception:
+                    regs = [r.strip() for r in regs_val.split(",") if r.strip()]
+            elif isinstance(regs_val, list):
+                regs = [str(r).strip() for r in regs_val if str(r).strip()]
+            else:
+                regs = []
+
+            # Map to allowed; keep “None” only if it is the only thing and v == No
+            regs = sanitize_regulations_dynamic(regs, allowed)
+
+            # ---------- HARD RULES ----------
+            if v == "No":
+                # Must be exactly ["None"]
+                regs = ["None"]
+
+            elif v == "Yes":
+                # Must include at least one real label (not “None”)
+                has_real = any(r in real_labels for r in regs)
+                if not has_real:
+                    bad_rows.append((fid, "Violation=Yes requires at least one real regulation (not 'None')."))
+                    continue  # do not save this row
+
+            # Build final normalized record
+            row_before = base_map.loc[fid].to_dict()
+            cleaned = {
+                "feature_id": ui_row.get("feature_id"),
+                "feature_name": ui_row.get("feature_name"),
+                "feature_description": ui_row.get("feature_description"),
+                "violation": v,
+                "confidence_level": 2,   # explicit human override
+                "reason": str(ui_row.get("reason", "") or ""),
+                "regulations": regs,
+            }
+
+            final_norm = enforce_schema(cleaned, allowed)
+            final_norm = _coerce_violation_regs(final_norm, allowed)
+            final_norm["confidence_level"] = 2
+
+            # Update precedent memory
+            prec_rows.append({
+                "feature_id": str(final_norm["feature_id"]),
+                "feature_name": final_norm["feature_name"],
+                "feature_description": final_norm["feature_description"],
+                "violation": final_norm["violation"],
+                "confidence_level": final_norm["confidence_level"],
+                "reason": final_norm["reason"],
+                "regulations": final_norm["regulations"],
+            })
+
+            # Reflect changes into AI2_FULL_DF
+            mask = (st.session_state.AI2_FULL_DF["feature_id"].astype(str) == fid)
+            row_count = int(mask.sum())
+            if row_count == 0:
+                bad_rows.append((fid, "Unknown feature_id"))
+                continue
+
+            # Scalars broadcast fine to multiple rows
+            st.session_state.AI2_FULL_DF.loc[mask, "violation"] = final_norm["violation"]
+            st.session_state.AI2_FULL_DF.loc[mask, "confidence_level"] = final_norm["confidence_level"]
+            st.session_state.AI2_FULL_DF.loc[mask, "reason"] = final_norm["reason"]
+
+            # For the list-typed column, repeat the list for each matching row
+            st.session_state.AI2_FULL_DF.loc[mask, "regulations"] = [final_norm["regulations"]] * row_count
+
+            # Update the editor source mirror
+            mask_src = st.session_state["ai2_editor_source"]["feature_id"].astype(str) == fid
+            st.session_state["ai2_editor_source"].loc[mask_src, "violation"] = final_norm["violation"]
+            st.session_state["ai2_editor_source"].loc[mask_src, "confidence_level"] = final_norm["confidence_level"]
+            st.session_state["ai2_editor_source"].loc[mask_src, "reason"] = final_norm["reason"]
+            st.session_state["ai2_editor_source"].loc[mask_src, "regulations"] = ", ".join(final_norm["regulations"])
+
+            # Timelog
+            feature_ctx = {
+                "feature_id": final_norm.get("feature_id"),
+                "feature_name": final_norm.get("feature_name"),
+                "feature_description": final_norm.get("feature_description"),
+            }
+            before_norm = enforce_schema({**row_before, "regulations": row_before.get("regulations", [])}, allowed)
+            log_event("human_intervention", feature=feature_ctx, before=before_norm, after=final_norm, note="Reviewer set confidence_level=2")
+            saved += 1
+
+        except Exception as e:
+            bad_rows.append((str(ui_row.get("feature_id")), f"Unexpected error: {e}"))
             continue
 
-        fid = str(row_after_ui.get("feature_id"))
-        if fid not in base_map.index:
-            continue
-
-        row_before = base_map.loc[fid].to_dict()
-
-        regs_str = row_after_ui.get("regulations", "")
-        regs_list = [r.strip() for r in str(regs_str).split(",") if r.strip()]
-        row_after_ui["regulations"] = sanitize_regulations_dynamic(regs_list, allowed)
-
-        cleaned = {
-            "feature_id": row_after_ui.get("feature_id"),
-            "feature_name": row_after_ui.get("feature_name"),
-            "feature_description": row_after_ui.get("feature_description"),
-            "violation": row_after_ui.get("violation"),
-            "confidence_level": row_after_ui.get("confidence_level"),
-            "reason": row_after_ui.get("reason"),
-            "regulations": row_after_ui.get("regulations"),
-        }
-        final_norm = enforce_schema(cleaned, allowed)
-        final_norm = _coerce_violation_regs(final_norm, allowed)
-        final_norm["confidence_level"] = 2  # mark human intervention
-
-
-        # Update precedent memory rows
-        prec_rows.append({
-            "feature_id": str(final_norm["feature_id"]),
-            "feature_name": final_norm["feature_name"],
-            "feature_description": final_norm["feature_description"],
-            "violation": final_norm["violation"],
-            "confidence_level": final_norm["confidence_level"],
-            "reason": final_norm["reason"],
-            "regulations": final_norm["regulations"],
-        })
-
-        # Reflect changes back to AI2_FULL_DF by fid
-        mask = st.session_state.AI2_FULL_DF["feature_id"].astype(str) == fid
-        for col in ("violation", "confidence_level", "reason", "regulations"):
-            st.session_state.AI2_FULL_DF.loc[mask, col] = [final_norm[col]]
-
-        # Update editor source (string regs)
-        mask_src = st.session_state["ai2_editor_source"]["feature_id"].astype(str) == fid
-        st.session_state["ai2_editor_source"].loc[mask_src, "violation"] = final_norm["violation"]
-        st.session_state["ai2_editor_source"].loc[mask_src, "confidence_level"] = final_norm["confidence_level"]
-        st.session_state["ai2_editor_source"].loc[mask_src, "reason"] = final_norm["reason"]
-        st.session_state["ai2_editor_source"].loc[mask_src, "regulations"] = ", ".join(final_norm["regulations"])
-
-        # Timelog entry
-        feature_ctx = {
-            "feature_id": final_norm.get("feature_id"),
-            "feature_name": final_norm.get("feature_name"),
-            "feature_description": final_norm.get("feature_description"),
-        }
-        before_norm = enforce_schema({**row_before, "regulations": row_before.get("regulations", [])}, allowed)
-        log_event("human_intervention", feature=feature_ctx, before=before_norm, after=final_norm, note="Reviewer set confidence_level=2")
-        saved += 1
-
-    # Persist precedents & rebuild index once
+    # Persist memory & rebuild tf-idf index once
     st.session_state.PRECEDENT_ROWS = prec_rows
-    build_precedent_index(pd.DataFrame(prec_rows))
+    build_precedent_index(pd.DataFrame(prec_rows), ALLOWED_REGS)
     st.session_state.AI2_DF = st.session_state.AI2_FULL_DF.copy()
 
     # Update DASHBOARD snapshot
@@ -904,6 +971,12 @@ def _save_ai2_corrections(edited_df: pd.DataFrame):
 
     st.session_state.AI2_SAVED_TS = _now_iso()
     st.session_state.AI2_SAVED_COUNT = saved
+
+    if bad_rows:
+        msgs = "\n".join(f"• {fid}: {why}" for fid, why in bad_rows)
+        st.error(f"Some rows were NOT saved due to rule violations:\n{msgs}")
+    if saved:
+        st.success(f"Saved {saved} row(s) with human overrides.")
 
 # -------- Render phase: always show if data exists ----------
 def _recompute_needs_review():
@@ -917,7 +990,6 @@ def _recompute_needs_review():
         conf = pd.to_numeric(df["confidence_level"], errors="coerce").fillna(0.0)
     st.session_state.NEEDS_REVIEW = df[(df["violation"] == "Unclear") | (conf < 0.3)]
 
-
 if st.session_state.get("AI2_DF") is not None and st.session_state.get("ai2_editor_source") is not None:
     # 1) Read-only results (always reflects latest saved state)
     with st.expander("AI_2 Results (read-only with precedent)", expanded=True):
@@ -927,10 +999,58 @@ if st.session_state.get("AI2_DF") is not None and st.session_state.get("ai2_edit
     with st.expander("AI_2 Summary (editable)", expanded=st.session_state.get("AI_2_EXPANDED", True)):
         st.text("Edit rows; set confidence_level = 2 to mark a HUMAN correction. Only those rows will be saved to memory.")
 
-        # Freeze the source shown in the editor; don't mutate on keystrokes
-        src = st.session_state["ai2_editor_source"].copy(deep=True)
+        valid_v_choices = ["Yes", "No"]  # enforce Yes/No only in the UI
 
-        # Use a form so edits don’t change session state until Save is pressed
+        # Build a fresh editable DataFrame each render
+        if st.session_state.get("AI2_DF") is not None and not st.session_state.AI2_DF.empty:
+            base_df = st.session_state.AI2_DF.copy()
+        elif st.session_state.get("AI1_DF") is not None and not st.session_state.AI1_DF.empty:
+            base_df = st.session_state.AI1_DF.copy()
+        else:
+            base_df = pd.DataFrame(columns=[
+                "feature_id","feature_name","feature_description","violation","confidence_level","reason","regulations","reason2","past_record"
+            ])
+
+        # Ensure all needed cols exist
+        for c in ["feature_id","feature_name","feature_description","violation","confidence_level","reason","regulations","reason2","past_record"]:
+            if c not in base_df.columns:
+                base_df[c] = [] if c == "regulations" else (0.0 if c == "confidence_level" else "")
+
+        # Merge reason + reason2 for editing
+        def _merge_reasons(a, b):
+            a = str(a or "").strip()
+            b = str(b or "").strip()
+            return (a if a else "") if not b else (f"{a} | {b}" if a else b)
+        base_df["reason"] = [_merge_reasons(a, b) for a, b in zip(base_df.get("reason", ""), base_df.get("reason2", ""))]
+
+        # Normalize types
+        base_df["violation"] = base_df["violation"].apply(lambda v: v if v in valid_v_choices else ("Yes" if str(v).strip().lower() in {"y","yes","true","1"} else "No"))
+        base_df["confidence_level"] = pd.to_numeric(base_df.get("confidence_level", 0), errors="coerce").fillna(0.0)
+
+        def _to_list(v):
+            if isinstance(v, list):
+                return [str(x).strip() for x in v if str(x).strip()]
+            s = "" if v is None else str(v)
+            try:
+                j = json.loads(s)
+                if isinstance(j, list):
+                    return [str(x).strip() for x in j if str(x).strip()]
+            except Exception:
+                pass
+            return [t.strip() for t in s.split(",") if t.strip()]
+        base_df["regulations"] = base_df["regulations"].apply(_to_list)
+
+        # Show only the key columns for editing
+        edit_df = base_df[["feature_id","feature_name","feature_description","violation","confidence_level","reason","regulations"]].copy()
+        edit_df["regulations"] = (
+            edit_df["regulations"]
+            .apply(lambda v: ", ".join(v) if isinstance(v, list) else ("" if v is None else str(v)))
+            .astype("string")   # force pandas StringDtype (helps Streamlit infer TEXT)
+        )
+        # Dynamic options = names from folder (without .txt). We let user pick those;
+        # "None" is enforced automatically on save when violation == "No".
+        allowed_opts_for_editor = [r for r in ALLOWED_REGS if r != "None"]
+
         with st.form("ai2_edit_form", clear_on_submit=False):
             edited_df = st.data_editor(
                 edit_df,
@@ -939,34 +1059,38 @@ if st.session_state.get("AI2_DF") is not None and st.session_state.get("ai2_edit
                 num_rows="fixed",
                 column_config={
                     "violation": st.column_config.SelectboxColumn(
-                        "violation", options=valid_v_choices, help="Pick Yes, No, or Unclear"
+                        "violation",
+                        options=valid_v_choices,
+                        help="Pick Yes or No"
                     ),
-                    # ListColumn works in recent Streamlit; if your version is older, this still renders as text.
-                    "regulations": st.column_config.ListColumn(
-                        "regulations", help="Pick labels. If violation=No, this will be forced to ['None'] on save."
+                    "regulations": st.column_config.TextColumn(
+                        "regulations",
+                        help="Comma-separated. Allowed values: "
+                            + ", ".join(ALLOWED_REGS) +
+                            ". If violation=No, it will be forced to ['None'] on save."
                     ),
                     "confidence_level": st.column_config.NumberColumn(
-                        "confidence_level", min_value=0.0, max_value=2.0, step=0.1, help="Set to 2 to mark human override"
+                        "confidence_level",
+                        min_value=0.0, max_value=2.0, step=0.1,
+                        help="Set to 2 to mark human override"
                     ),
                 },
             )
             submitted = st.form_submit_button("💾 Save corrections to memory", type="primary")
 
         if submitted:
-            # keep UI open after save
             st.session_state.AI_2_EXPANDED = True
+            st.session_state["ai2_editor_source"] = edited_df.copy(deep=True)
+            _save_ai2_corrections(edited_df)  # uses ALLOWED_REGS in your enforcement
 
-            # ✅ apply changes only now
-            _save_ai2_corrections(edited_df)
-
-            # refresh Needs Review view immediately
+            # Refresh Needs Review
             def _recompute_needs_review():
                 df = st.session_state.get("AI2_DF")
                 if df is None or df.empty:
                     st.session_state.NEEDS_REVIEW = pd.DataFrame()
                 else:
-                    conf = pd.to_numeric(df["confidence_level"], errors="coerce").fillna(0.0)
-                    st.session_state.NEEDS_REVIEW = df[(df["violation"] == "Unclear") | (conf < 0.3)]
+                    conf = pd.to_numeric(df.get("confidence_level", 0), errors="coerce").fillna(0.0)
+                    st.session_state.NEEDS_REVIEW = df[conf < 0.3]
             _recompute_needs_review()
 
             st.toast("Saved corrections. Tables updated below.", icon="✅")
