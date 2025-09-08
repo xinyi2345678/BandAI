@@ -1,4 +1,4 @@
-<img width="65" height="21" alt="BandAI Logo" src="https://github.com/user-attachments/assets/1d63cbe1-dcd9-4c0e-b1c6-119a5a4f2703" />
+
 
 # BandAI
 
