@@ -347,7 +347,7 @@ except Exception:
     pass
 
 st.set_page_config(
-    page_title="Geo-Reg Compliance — No‑RAG",
+    page_title="Geo-Reg Compliance — BandAI",
     page_icon=logo_icon if logo_icon else "🛡️",
     layout="wide",
 )
