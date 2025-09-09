@@ -555,6 +555,24 @@ def build_precedent_index(dashboard_df: pd.DataFrame, allowed_regs: list[str]):
         st.session_state.PRECEDENT_VEC = None
         st.session_state.PRECEDENT_MAT = None
 
+def pick_top_precedents(feature_name: str, feature_desc: str, k: int = 5):
+    text = f"{(feature_name or '').strip()}\n{(feature_desc or '').strip()}".strip()
+    matches = find_similar_precedents(text, top_k=k)  # uses your TF-IDF index
+    return [m[1] for m in matches]  # just the rows
+
+def compress_precedents(rows: list[dict], max_desc: int = 180):
+    """Trim to the smallest useful fields and truncate description."""
+    out = []
+    for r in rows:
+        out.append({
+            "feature_id": str(r.get("feature_id","")),
+            "feature_name": str(r.get("feature_name",""))[:120],
+            "feature_description": str(r.get("feature_description",""))[:max_desc],
+            "violation": sanitize_violation(r.get("violation","")),
+            "regulations": sanitize_regulations_dynamic(r.get("regulations", []), []),
+        })
+    return out
+
 def find_similar_precedents(feature_text: str, top_k: int = 3) -> list[tuple[float, dict]]:
     vec = st.session_state.get("PRECEDENT_VEC")
     mat = st.session_state.get("PRECEDENT_MAT")
@@ -819,7 +837,7 @@ st.header("Features input")
 with st.form("features_text_form", clear_on_submit=False):
     features_text = st.text_area(
         "For quick checks, paste features in following format without brackets (Feature_name: Feature_description per line)",
-        value=st.session_state.get("FEATURES_PASTE", ""),
+        value= """Universal PF deactivation on guest mode: By default, PF will be turned off for all uses browsing in guest mode.""",
         height=120,
     )
     submit_text = st.form_submit_button("📥 Submit text features")
@@ -894,12 +912,6 @@ if features_df.empty:
     st.info("No features detected yet. Submit text features and/or load a file, then click “Upload all features”.")
 else:
     st.dataframe(features_df, use_container_width=True)
-    st.download_button(
-        "⬇️ Download combined_feature.json",
-        data=combined_feature_json,
-        file_name="combined_feature.json",
-        mime="application/json",
-    )
 
 # ---- Guard before run (no undefined variables; no 'documents') ----
 can_run = (features_df.shape[0] > 0) and bool(terminology_json_text)
@@ -921,7 +933,10 @@ if run_btn:
             "feature_description": str(row.get("feature_description", "")),
         }
         try:
-            raw = rag_answer(r,terminology_json_text)
+            raw = rag_answer(r, terminology_json_text)
+            data = safe_json(raw)
+            if not isinstance(data, dict):
+                raise ValueError("Tik AI returned invalid JSON")
             data = None
             if raw:
                 raw_strip = raw.strip()
@@ -967,10 +982,6 @@ if run_btn:
 if st.session_state.RESULTS_READY and st.session_state.AI1_DF is not None:
     st.subheader("Results — Tik AI")
     st.dataframe(st.session_state.AI1_DF, use_container_width=True)
-
-    # Download JSON/CSV
-    results_json = st.session_state.AI1_DF.to_json(orient="records", force_ascii=False, indent=2)
-    st.download_button("⬇️ Download results.json", data=results_json, file_name="results_ai1.json", mime="application/json")
     st.download_button("⬇️ Download results.csv", data=st.session_state.AI1_DF.to_csv(index=False), file_name="results_ai1.csv", mime="text/csv")
 # -----------------------------------------------------------
 # AI_2 pass: precedent-aware auto-correction
@@ -986,27 +997,24 @@ if st.session_state.RESULTS_READY and st.session_state.AI1_DF is not None:
         prog, total = st.progress(0), len(st.session_state.AI1_DF)
         for i, r in st.session_state.AI1_DF.iterrows():
             ai1 = r.to_dict()
-            ai2 = rag_answer2(ai1, terminology_json_text, st.session_state.PRECEDENT_ROWS)
-            ai2 = ai2.strip()
-            try:
-                ai2 = json.loads(ai2)
-            except Exception:
-                m = re.search(r"```(?:json)?\s*(\{[\s\S]*?\})\s*```", ai2, re.I)
-                if m:
-                    try:
-                        ai2 = json.loads(m.group(1))
-                    except Exception as e:
-                        ai2 = {
-                            "feature_id": r["feature_id"],
-                            "feature_name": r["feature_name"],
-                            "feature_description": r["feature_description"],
-                            "violation": "Unclear",
-                            "confidence_level": 0.0,
-                            "reason": f"AI_1 error: {e}",
-                            "regulations": ["None"],
-                            "reason2": f"AI_1 error: {e}",
-                            "past_records": ["None"]
-                        }
+            text = f"{ai1.get('feature_name','')}\n{ai1.get('feature_description','')}".strip()
+            matches = find_similar_precedents(text, top_k=5)  # uses your TF-IDF index
+            past_subset = [m[1] for m in matches]            # just the row dicts
+
+            raw_ai2 = rag_answer2(ai1, terminology_json_text, past_subset)
+            ai2 = safe_json(raw_ai2)
+            if not isinstance(ai2, dict):
+                ai2 = {
+                    "feature_id": r["feature_id"],
+                    "feature_name": r["feature_name"],
+                    "feature_description": r["feature_description"],
+                    "violation": "Unclear",
+                    "confidence_level": 0.0,
+                    "reason": "Tok AI returned invalid JSON",
+                    "regulations": ["None"],
+                    "reason2": "Tok AI returned invalid JSON",
+                    "past_records": [],
+                }
 
             # --- Normalize Tok keys/shapes so downstream UI is happy ---
             # Prefer singular 'past_record'

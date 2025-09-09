@@ -135,8 +135,8 @@ feature_description:
 
 
 
-def rag_answer2(response1,term_text, past_records):
-    if len(past_records)>100:
+def rag_answer2(response1, term_text, past_records):
+    if len(past_records) > 100:
         past_texts = [json.dumps(pr, ensure_ascii=False) for pr in past_records]
         emb = embedder.encode(past_texts, convert_to_numpy=True)
         dim = int(emb.shape[1])
@@ -147,7 +147,7 @@ def rag_answer2(response1,term_text, past_records):
         q_emb = embedder.encode([q], convert_to_numpy=True)
         k = min(50, len(past_records))
         D, I = local_idx.search(np.asarray(q_emb, dtype=np.float32), k)
-        retrieved = [past_records[i] for i in I[0]]
+        retrieved_docs = [past_records[i] for i in I[0]]   # <-- use retrieved_docs
     else:
         retrieved_docs = past_records
     prompt = f"""
