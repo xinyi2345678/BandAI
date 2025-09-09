@@ -385,8 +385,26 @@ with col2:
 with col3:
     st.markdown("")
     
-st.title("🛡️ Geo-Reg Compliance Checker — DUO AI POWERED BY RAG")
-st.link_button("Click to open Looker Studio Visualisation by Google Analytics", url = "https://lookerstudio.google.com/reporting/e081e397-63bd-4000-9227-893fc9d86033")
+st.markdown(
+    """
+    <div class="hero">
+      <h1 class="hero-title">
+        <span class="emoji">🛡️</span>
+        <span class="grad">Geo-Reg Compliance Checker</span>
+        <span class="tag">DUO AI • Powered by RAG</span>
+      </h1>
+      <div class="hero-actions">
+        <a class="link-btn primary" href="https://lookerstudio.google.com/reporting/e081e397-63bd-4000-9227-893fc9d86033" target="_blank" rel="noopener">
+          <svg class="ico" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M14 3h7v7h-2V6.41l-9.29 9.3-1.42-1.42 9.3-9.29H14V3ZM5 5h6v2H7v10h10v-4h2v6H5V5Z"/>
+          </svg>
+          Open Looker Studio
+        </a>
+      </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
 # Session defaults
 defaults = {
@@ -516,64 +534,134 @@ def ai2_from_precedent(ai1_json: dict, allowed_regs: list[str], sim_threshold: f
             return enforce_schema(out, allowed_regs)
     # No close precedent → keep AI_1, but add reason2 note
     out = {**ai1_json}
-    out["reason2"] = "No sufficiently similar precedent. Kept AI_1."
+    out["reason2"] = "No sufficiently similar precedent. Kept Tik AI."
     out["past_record"] = {}
     return enforce_schema(out, allowed_regs)
 
+import os, re
+import streamlit as st
+
+# ================== SIDEBAR (COMPACT & SAFE) ==================
 with st.sidebar:
-    st.subheader("1) Upload Terminology")
-    term_upload = st.file_uploader("Terminology (CSV/XLSX)", type=["csv", "xlsx"])
-    term_df, terminology_json_text = parse_terminology_upload(term_upload)
-    st.session_state["TERMINOLOGY_DF"] = term_df
-    st.session_state["TERMINOLOGY_JSON_TEXT"] = terminology_json_text
+    st.markdown('<div class="sidebar-wrap">', unsafe_allow_html=True)
 
-    if term_df is not None and not term_df.empty:
-        st.caption(f"Loaded {len(term_df)} terminology rows.")
+    # ---------- 1) Upload Terminology ----------
+    st.markdown('<div class="sb-card"><h4>Upload Terminology</h4>', unsafe_allow_html=True)
+    with st.form("form_term_upload", clear_on_submit=False):
+        term_upload = st.file_uploader("Terminology", type=["csv", "xlsx"], key="term_upload")
+        c1, c2 = st.columns(2)
+        submitted_term = c1.form_submit_button("📥 Load", use_container_width=True)
+        clear_term     = c2.form_submit_button("🧹 Clear", use_container_width=True)
 
-    st.subheader("2) Features Source")
-    features_file = st.file_uploader("Features (CSV/XLSX with feature_name, feature_description)", type=["csv", "xlsx"])
-    st.caption("Or paste lines below as: Name: Description")
-    
-    st.subheader("3) Regulations (.txt) -- Optional")
-    regs_uploads = st.file_uploader(
-        "Upload regulation files (TXT only)",
-        type=["txt"], accept_multiple_files=True, key="regs_txt_uploader"
-    )
+    if submitted_term:
+        try:
+            term_df, terminology_json_text = parse_terminology_upload(term_upload)
+            st.session_state["TERMINOLOGY_DF"] = term_df
+            st.session_state["TERMINOLOGY_JSON_TEXT"] = terminology_json_text
+            if term_df is not None and not term_df.empty:
+                st.success(f"Loaded {len(term_df)} terminology rows.")
+                with st.expander("Preview (first 10)"):
+                    st.dataframe(term_df.head(10), use_container_width=True)
+            else:
+                st.info("Terminology file is empty or could not be parsed.")
+        except Exception as e:
+            st.error(f"Failed to parse terminology: {e}")
 
-    if st.button("💾 Save to Regulations/ and refresh RAG", type="primary", use_container_width=True):
+    if clear_term:
+        st.session_state.pop("TERMINOLOGY_DF", None)
+        st.session_state.pop("TERMINOLOGY_JSON_TEXT", None)
+        st.toast("Cleared terminology.", icon="🧹")
+
+    if st.session_state.get("TERMINOLOGY_DF") is not None:
+        st.caption(f"✓ Terminology ready · {len(st.session_state['TERMINOLOGY_DF'])} rows")
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    # ---------- 2) Features Source ----------
+    st.markdown('<div class="sb-card"><h4>Features Source</h4>', unsafe_allow_html=True)
+    with st.form("form_features_upload", clear_on_submit=False):
+        features_file = st.file_uploader(
+            "Features (eature_name, feature_description)",
+            type=["csv", "xlsx"], key="features_upload"
+        )
+        features_paste = st.text_area(
+            "Or paste: Name: Description (one per line)", height=90, key="features_paste_sb"
+        )
+        c1, c2 = st.columns(2)
+        submitted_feat = c1.form_submit_button("📦 Stage", use_container_width=True)
+        clear_feat     = c2.form_submit_button("🧹 Clear",  use_container_width=True)
+
+    if submitted_feat:
+        st.session_state["FEATURES_FILE"] = features_file
+        st.session_state["FEATURES_PASTE"] = features_paste
+        st.success("Features staged. Process them in the main flow (Tab 1 → Build features).")
+
+    if clear_feat:
+        st.session_state.pop("FEATURES_FILE", None)
+        st.session_state.pop("FEATURES_PASTE", None)
+        st.toast("Cleared staged features.", icon="🧹")
+
+    if st.session_state.get("FEATURES_FILE") or st.session_state.get("FEATURES_PASTE"):
+        source = "file" if st.session_state.get("FEATURES_FILE") else "pasted text"
+        st.caption(f"✓ Features staged from {source}.")
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    # ---------- 3) Regulations (.txt) — Optional ----------
+    st.markdown('<div class="sb-card"><h4>Regulations (.txt) — Optional</h4>', unsafe_allow_html=True)
+    with st.form("form_regs_upload", clear_on_submit=False):
+        regs_uploads = st.file_uploader(
+            "Upload TXT file(s)", type=["txt"], accept_multiple_files=True, key="regs_txt_uploader"
+        )
+        c1, c2 = st.columns(2)
+        submitted_regs = c1.form_submit_button("💾 Save & Refresh RAG", use_container_width=True)
+        clear_regs     = c2.form_submit_button("🧹 Clear list",          use_container_width=True)
+
+    if submitted_regs:
         saved_names = []
         try:
             os.makedirs("Regulations", exist_ok=True)
             if regs_uploads:
                 for f in regs_uploads:
-                    # normalize filename
                     safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", f.name.strip()) or "regulations.txt"
                     path = os.path.join("Regulations", safe_name)
                     content = f.getvalue()
-                    # ensure bytes
-                    if isinstance(content, str):
+                    if isinstance(content, str):  # ensure bytes
                         content = content.encode("utf-8", errors="replace")
                     with open(path, "wb") as out:
                         out.write(content)
                     saved_names.append(safe_name)
 
-            # refresh AI_main memory + index
             loaded = reload_regulations("Regulations")
-            st.success(f"Refreshed RAG with {len(loaded)} regulation file(s).")
-            if saved_names:
-                st.info("Saved: " + ", ".join(saved_names))
-
-            # cache a copy to show below
             st.session_state.LOADED_REG_FILES = loaded
+            st.success(f"RAG refreshed with {len(loaded)} regulation file(s).")
+            if saved_names:
+                st.caption("Saved: " + ", ".join(saved_names))
         except Exception as e:
             st.error(f"Save/refresh failed: {e}")
+
+    if clear_regs:
+        # chỉ clear danh sách đã load trong session (không xóa file trên disk)
+        st.session_state.pop("LOADED_REG_FILES", None)
+        st.toast("Cleared loaded list (files on disk kept).", icon="🧹")
+
+    loaded_regs = st.session_state.get("LOADED_REG_FILES") or []
+    if loaded_regs:
+        with st.expander(f"📚 Loaded regulations ({len(loaded_regs)})"):
+            for fn in loaded_regs:
+                st.markdown(f"• {fn}")
+    else:
+        st.caption("No regulation files loaded yet.")
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown("</div>", unsafe_allow_html=True)  # /.sidebar-wrap
+# ================== END SIDEBAR ==================
+
 
 # --- Clear sheets with two-step confirm ---
 if "clear_button_armed" not in st.session_state:
     st.session_state.clear_button_armed = False
 
 # Step 1: arm the clear
-if st.button("🧹 Clear DASHBOARD + TIMELOGS (keep headers)", type="secondary", key="btn_clear_arm"):
+if st.button("🧹 Clear Dashboard & Timelogs", type="secondary", key="btn_clear_arm"):
     st.session_state.clear_button_armed = True
 
 # Step 2: show confirm UI only while armed
@@ -624,7 +712,9 @@ if st.session_state.clear_button_armed:
             # hide confirm UI after cancel
             st.session_state.clear_button_armed = False
 
-st.markdown("### 📚 Regulations loaded")
+st.markdown("### 📚 Regulations")
+
+# Lấy danh sách file
 loaded_regs = st.session_state.get("LOADED_REG_FILES")
 if loaded_regs is None:
     try:
@@ -632,13 +722,20 @@ if loaded_regs is None:
         loaded_regs = loaded_reg_files
     except Exception:
         loaded_regs = []
+
+# UI hiển thị
 if not loaded_regs:
-    st.info("No regulation files are currently loaded.")
+    st.warning("⚠️ No regulation files are currently loaded.")
 else:
-    st.success(f"{len(loaded_regs)} regulation file(s) loaded.")
-    with st.expander("Show files"):
-        for fn in loaded_regs:
-            st.markdown(f"• {fn}")
+    st.success(f"✅ {len(loaded_regs)} regulation file(s) loaded.")
+    with st.expander("📂 Show files", expanded=False):
+        st.markdown(
+            "<ul class='reg-list'>" +
+            "".join([f"<li>{fn}</li>" for fn in loaded_regs]) +
+            "</ul>",
+            unsafe_allow_html=True
+        )
+
 
 # ---- Allowed regulations come from the Regulations/ folder + "None" ----
 def _allowed_regs_from_loaded(loaded_files: list[str]) -> list[str]:
@@ -655,7 +752,7 @@ ALLOWED_REGS = _allowed_regs_from_loaded(loaded_regs)
 build_precedent_index(st.session_state.EXISTING_DASH, ALLOWED_REGS)
 
 # Features
-st.header("B) Features input")
+st.header("Features input")
 features_text = st.text_area("For quick checks, paste features in following format without brackets (Feature_name: Feature_description per line)")
 features_df, combined_feature_json = parse_features(features_file, features_text, existing_dash)
 
@@ -672,11 +769,11 @@ has_regs = bool(documents)
 
 can_run = (features_df.shape[0] > 0) and bool(terminology_json_text)
 if not can_run:
-    st.warning("To run AI_1, please provide: Terminology CSV/XLSX, and at least one Feature.")
+    st.warning("To run Tik AI, please provide: Terminology CSV/XLSX, and at least one Feature.")
 
 # Run AI_1
-st.header("C) Run Compliance Detection (AI_1)")
-run_btn = st.button("▶️ Run with AI_1", disabled=not can_run)
+st.header("Run Compliance Detection (Tik AI)")
+run_btn = st.button("▶️ Run with Tik AI", disabled=not can_run)
 
 if run_btn:
     rows_out = []
@@ -703,7 +800,7 @@ if run_btn:
                         except Exception:
                             data = None
             if not data:
-                raise ValueError("AI_1 returned invalid JSON")
+                raise ValueError("Tik AI returned invalid JSON")
             norm = ResultSchema.normalize(data, allowed_regs=ALLOWED_REGS)
         except Exception as e:
             norm = {
@@ -712,7 +809,7 @@ if run_btn:
                 "feature_description": r["feature_description"],
                 "violation": "Unclear",
                 "confidence_level": 0.0,
-                "reason": f"AI_1 error: {e}",
+                "reason": f"Tik AI error: {e}",
                 "regulations": ["None"],
             }
         rows_out.append(norm)
@@ -721,18 +818,18 @@ if run_btn:
             "prediction",
             feature={k: r[k] for k in ["feature_id","feature_name","feature_description"]},
             after={k: norm[k] for k in ["violation","confidence_level","regulations"]},
-            note="AI_1 output recorded",
+            note="Tik AI output recorded",
         )
         prog.progress(int((i + 1) / total * 100)); time.sleep(0.02)
     prog.empty()
 
     st.session_state.AI1_DF = pd.DataFrame(rows_out)
     st.session_state.RESULTS_READY = True
-    st.success("AI_1 completed.")
+    st.success("Tik AI completed.")
 
 # Results & Exports
 if st.session_state.RESULTS_READY and st.session_state.AI1_DF is not None:
-    st.subheader("Results — AI_1")
+    st.subheader("Results — Tik AI")
     st.dataframe(st.session_state.AI1_DF, use_container_width=True)
 
     # Download JSON/CSV
@@ -748,7 +845,7 @@ if st.session_state.RESULTS_READY and st.session_state.AI1_DF is not None:
     allowed = ALLOWED_REGS
 
     # -------- Compute phase: only when button is clicked ----------
-    if st.button("▶️ Run AI_2 on AI_1 results"):
+    if st.button("▶️ Run Tok AI on Tik AI results"):
         ai2_rows = []
         prog, total = st.progress(0), len(st.session_state.AI1_DF)
         for i, r in st.session_state.AI1_DF.iterrows():
@@ -781,7 +878,7 @@ if st.session_state.RESULTS_READY and st.session_state.AI1_DF is not None:
                       after={"violation": ai2.get("violation"),
                              "confidence_level": ai2.get("confidence_level"),
                              "regulations": ai2.get("regulations")},
-                      note="AI_2 output recorded")
+                      note="Tik AI output recorded")
             ai2_rows.append(ai2)
             prog.progress(int((i + 1) / total * 100)); time.sleep(0.02)
         prog.empty()
@@ -958,11 +1055,11 @@ def _recompute_needs_review():
 
 if st.session_state.get("AI2_DF") is not None and st.session_state.get("ai2_editor_source") is not None:
     # 1) Read-only results (always reflects latest saved state)
-    with st.expander("AI_2 Results (read-only with precedent)", expanded=True):
+    with st.expander("Tik AI Results (read-only with precedent)", expanded=True):
         st.dataframe(_arrow_safe(st.session_state.AI2_DF), use_container_width=True)
 
     # 2) Editable summary — user sets confidence_level == 2 to mark HUMAN correction
-    with st.expander("AI_2 Summary (editable)", expanded=st.session_state.get("AI_2_EXPANDED", True)):
+    with st.expander("Tik AI Summary (editable)", expanded=st.session_state.get("AI_2_EXPANDED", True)):
         st.text("Edit rows; set confidence_level = 2 to mark a HUMAN correction. Only those rows will be saved to memory.")
 
         valid_v_choices = ["Yes", "No"]  # enforce Yes/No only in the UI
@@ -1081,7 +1178,7 @@ if st.session_state.get("AI2_DF") is not None and st.session_state.get("ai2_edit
 # -----------------------------------------------------------
 # Export & Google Sheets sync
 # -----------------------------------------------------------
-with st.expander("D) Export Excel & Update Google Sheets", expanded=False):
+with st.expander("Export Excel & Update Google Sheets", expanded=False):
 
     def _norm_feature_id(df: pd.DataFrame) -> pd.DataFrame:
         if "feature_id" in df.columns:

@@ -4,6 +4,14 @@
 /* Apply TikTok Sans globally */
 html, body, [class*="css"], div, p, span, label, button {
     font-family: 'TikTok Sans', sans-serif !important;
+    html, body, [data-testid="stAppViewContainer"]{
+  background:
+    radial-gradient(520px 360px at 14% 8%,  rgba(0,242,234,.26), transparent 62%),
+    radial-gradient(520px 360px at 86% 14%, rgba(255,0,80,.24),  transparent 62%),
+    linear-gradient(180deg, #121217, #181a20);
+  background-attachment: fixed, fixed, fixed;  /* giữ glow cố định khi cuộn */
+  color:#f3f4f6;
+}
 }
 
 .bandai-title {
@@ -12,7 +20,7 @@ html, body, [class*="css"], div, p, span, label, button {
     text-align: center;
     letter-spacing: 4px;
     color: #fff;
-    animation: blink 1.5s infinite; /* nhấp nháy toàn cụm */
+    animation: blink 1.5s infinite; 
 }
 
 /* Blink effect */
@@ -51,11 +59,207 @@ html, body, [class*="css"], div, p, span, label, button {
     position: relative;
 }
 
-/* Keyframes: bay lên phải, biến mất, rồi quay lại từ dưới */
+
 @keyframes fly-cycle {
     0%   { transform: translate(0, 0) rotate(0deg); opacity: 1; }
     40%  { transform: translate(300px, -300px) rotate(45deg); opacity: 0; }
-    41%  { transform: translate(-50px, 100px) rotate(-20deg); opacity: 0; } /* xuất hiện lại từ dưới trái */
-    60%  { transform: translate(0, 0) rotate(0deg); opacity: 1; }          /* trở lại vị trí ban đầu */
+    41%  { transform: translate(-50px, 100px) rotate(-20deg); opacity: 0; } 
+    60%  { transform: translate(0, 0) rotate(0deg); opacity: 1; }        
     100% { transform: translate(0, 0) rotate(0deg); opacity: 1; }
+}
+
+.sb-card h4{
+  font-weight: 800;
+  font-size: 1.05rem;              
+  padding: .6rem .85rem;
+  margin: -.1rem -.1rem .7rem;
+  border-radius: 14px;
+  background: #0f0f12;           
+  border: 1px solid rgba(255,255,255,.12);
+  color: #fff;
+  letter-spacing: .2px;
+}
+
+.sb-card label{
+  font-weight: 600;
+  font-size: .92rem;
+  color: #e9e9ee;
+}
+
+/* Dropzone uploader gọn, đồng bộ bo góc */
+.sb-card [data-testid="stFileUploaderDropzone"]{
+  border-radius: 16px;
+  border: 1px dashed rgba(255,255,255,.18);
+  background: #101015;
+}
+
+.sb-card .stButton > button{
+  width: 100%;
+  min-height: 64px;             
+  border-radius: 12px;
+  white-space: normal;              
+  line-height: 1.2;
+}
+
+/* Hiệu ứng hover nhẹ */
+.sb-card .stButton > button:hover{
+  border-color: rgba(255,255,255,.22);
+  box-shadow: 0 6px 18px rgba(0,242,234,.12), 0 3px 10px rgba(255,0,80,.10);
+}
+section[data-testid="stSidebar"]{
+  background:
+    radial-gradient(520px 360px at 14% 8%,  rgba(0,242,234,.26), transparent 62%),
+    radial-gradient(520px 360px at 86% 14%, rgba(255,0,80,.24),  transparent 62%),
+    linear-gradient(180deg, #121217, #181a20);
+  border-right: 1px solid rgba(255,255,255,.08);
+}
+
+.sb-card{
+  border: 0px solid rgba(255,255,255,.14);
+}
+
+/* header card rõ & nổi hơn */
+.sb-card h4{
+  background: rgba(18,18,24,.94);
+  border: 1px solid rgba(255,255,255,.18);
+  color: #ffffff;
+}
+
+/* label/nhãn trong sidebar sáng hơn để dễ đọc */
+.sb-card label{ color:#f0f2f5; }
+
+/* nhỏ mà có võ: dot sáng hơn */
+.sb-dot{
+  box-shadow: 0 0 12px rgba(0,242,234,.7), 0 0 12px rgba(255,0,80,.5);
+}
+
+/* ==== Hero header for BandAI ==== */
+:root{ --tt-pink:#ff0050; --tt-cyan:#00f2ea; }
+
+.hero{
+  text-align:center;
+  margin: .6rem 0 1.1rem;
+}
+.hero-title{
+  margin:0 auto .6rem;
+  font-weight:900;
+  letter-spacing:.6px;
+  line-height:1.1;
+  font-size: clamp(26px, 4.6vw, 44px);
+  color:#fff;
+}
+.hero-title .emoji{ margin-right:.25rem; filter: drop-shadow(0 0 6px rgba(0,242,234,.35)); }
+.hero-title .grad{
+  background: linear-gradient(90deg, var(--tt-cyan), var(--tt-pink));
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.hero-title .tag{
+  display:block; margin-top:.25rem;
+  font-size: clamp(12px, 1.6vw, 14px);
+  font-weight:700; letter-spacing:.8px;
+  color:#bff8f4; opacity:.92;
+}
+
+/* Link button styled */
+.hero-actions{ display:flex; gap:.6rem; justify-content:center; }
+.link-btn{
+  display:inline-flex; align-items:center; gap:.5rem;
+  padding:.65rem 1rem;
+  border-radius:12px; text-decoration:none;
+  border:1px solid rgba(255,255,255,.14);
+  transition: transform .14s ease, box-shadow .22s ease, border-color .22s ease, filter .22s ease;
+}
+.link-btn.primary{
+  background: linear-gradient(90deg, var(--tt-cyan), var(--tt-pink));
+  color:#0f0f12; font-weight:800;
+  text-shadow:none;
+}
+.link-btn.primary:hover{
+  transform: translateY(-1px);
+  border-color: rgba(255,255,255,.26);
+  box-shadow: 0 12px 28px rgba(0,242,234,.18), 0 6px 16px rgba(255,0,80,.14);
+}
+.link-btn .ico{
+  width:1.05rem; height:1.05rem; display:inline-block; filter: drop-shadow(0 0 4px rgba(0,0,0,.25));
+}
+
+:root{ --cyan: var(--tt-cyan, #00f2ea); --pink: var(--tt-pink, #ff0050); }
+
+/* Card nhỏ trước nút Clean */
+.clean-wrap{
+  background:#16161c;
+  border:1px solid rgba(255,255,255,.14);
+  border-radius:14px;
+  padding:.7rem .85rem; margin:.5rem 0 .6rem;
+}
+.clean-head{ display:flex; align-items:center; gap:.5rem; }
+.clean-ico{ font-size:1.05rem; }
+.clean-title{ font-weight:800; color:#fff; letter-spacing:.2px; }
+.clean-note{ color:#a6a6ad; font-size:.9rem; margin-top:.3rem }
+
+/* Style CHỈ cho nút ngay sau .clean-wrap */
+.clean-wrap + div .stButton > button{
+  width:100%; min-height:56px; border-radius:12px; font-weight:800;
+  color:#0f0f12;
+  background: linear-gradient(90deg, var(--cyan), var(--pink)) !important;
+  border:1px solid rgba(255,255,255,.18);
+  position: relative; overflow: hidden;
+  transition: transform .14s ease, box-shadow .22s ease, border-color .22s ease, filter .22s ease;
+}
+/* Sheen khi hover */
+.clean-wrap + div .stButton > button::after{
+  content:""; position:absolute; top:-120%; left:-40%;
+  width:80%; height:340%;
+  background: linear-gradient(120deg, transparent 0%,
+    rgba(255,255,255,.12) 22%, rgba(255,255,255,.32) 34%,
+    rgba(255,255,255,.12) 46%, transparent 60%);
+  transform: rotate(20deg) translate3d(-140%,0,0);
+  transition: transform .45s ease; pointer-events:none;
+}
+.clean-wrap + div .stButton > button:hover{
+  transform: translateY(-1px);
+  border-color: rgba(255,255,255,.28);
+  box-shadow: 0 12px 28px rgba(0,242,234,.18), 0 6px 16px rgba(255,0,80,.14);
+}
+.clean-wrap + div .stButton > button:hover::after{
+  transform: rotate(20deg) translate3d(230%,0,0);
+}
+div.stButton > button:first-child {
+    background: linear-gradient(90deg, #b31217, #000000);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 0.6em 1.2em;
+    font-size: 16px;
+    font-weight: 600;
+    transition: all 0.3s ease;
+    cursor: pointer;
+}
+
+div.stButton > button:first-child:hover {
+    background: linear-gradient(90deg, #ff0000, #1a1a1a);
+    transform: scale(1.05);
+    box-shadow: 0 0 12px rgba(255, 0, 0, 0.6);
+}
+
+/* ==== Regulations list UI ==== */
+ul.reg-list{
+  list-style-type: none;
+  padding-left: 0;
+  margin: .3rem 0;
+}
+ul.reg-list li{
+  background:#16161c;
+  border:1px solid rgba(255,255,255,.12);
+  border-radius:10px;
+  padding:.4rem .7rem;
+  margin-bottom:.35rem;
+  color:#f3f4f6;
+  font-size:.9rem;
+  transition: transform .12s ease, box-shadow .18s ease;
+}
+ul.reg-list li:hover{
+  transform: translateY(-1px);
+  border-color: rgba(0,242,234,.28);
+  box-shadow: 0 4px 12px rgba(0,242,234,.14), 0 2px 6px rgba(255,0,80,.12);
 }
