@@ -538,7 +538,7 @@ def build_precedent_index(dashboard_df: pd.DataFrame, allowed_regs: list[str]):
                 "feature_name": str(r.get("feature_name", "")),
                 "feature_description": str(r.get("feature_description", "")),
                 "violation": sanitize_violation(r.get("violation", "")),
-                "confidence_level": sanitize_confidence(r.get("confidence_level", 1.0)),  # <-- 1.0 default
+                "confidence_level": sanitize_confidence(r.get("confidence_level", 1.0)), 
                 "reason": str(r.get("reason", "")),
                 "regulations": sanitize_regulations_dynamic(regs_list, allowed_regs),
             })
@@ -593,9 +593,6 @@ def ai2_from_precedent(ai1_json: dict, allowed_regs: list[str], sim_threshold: f
     out["reason2"] = "No sufficiently similar precedent. Kept Tik AI."
     out["past_record"] = {}
     return enforce_schema(out, allowed_regs)
-
-import os, re
-import streamlit as st
 
 # ================== SIDEBAR (COMPACT & SAFE) ==================
 with st.sidebar:
