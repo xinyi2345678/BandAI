@@ -90,9 +90,9 @@ Hard rules:
 - "violation" MUST be either "Yes" or "No".
 - Reason must be a carefully thought and concise explanation of why you think it is a violation or not.
 - If Yes, you must return the relevant regulation(s) that the feature violates. However, if you think it's a violation but you unable to find at least 1 relevant regulation, return no, but state why you think it violates.
-- If No, you must explain why the feature does not violate any regulations.
+- If No, you must talk about which regulation is relevant and explain why the feature does not violate the regulations.
 - You are ONLY allowed to return regulation names from the ALLOWED LIST below. Do NOT invent new names.
-- If you cannot cite at least one allowed regulation, set "violation": "No" and "regulations": ["None"].
+- If you cannot cite at least one allowed regulation, set"regulations": ["None"].
 
 ALLOWED REGULATION NAMES:
 {allowed_lines}
@@ -152,13 +152,14 @@ def rag_answer2(response1,term_text, past_records):
         retrieved_docs = past_records
     prompt = f"""
     You are a compliance assistant. Your job is to compare past records to see if the current decision made on whether a new feature violates a regulation. You are to either support or reject the decision made based on what happened in the past. Disregard the original confidence level when making your decisions.
+    If no past records are given, just agree to whatever input you are given.
     Current decision:
     {response1}
     
     Terminologies:
     {term_text}
     Past records:
-    {retrieved_docs}
+    {json.dumps(retrieved_docs)}
     Return ONLY valid JSON exactly as:
     {{
         "feature_id": original id of the feature,
